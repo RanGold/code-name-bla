@@ -142,11 +142,11 @@ int main(int argc, char** argv) {
 
 		/* Preparing send data */
 		message.messageType = string;
-		message.size = strlen(WELLCOME_MESSAGE) + 1;
-		message.data = calloc(sizeof(char), message.size);
-		memcpy(message.data, WELLCOME_MESSAGE, message.size);
+		message.dataSize = strlen(WELLCOME_MESSAGE) + 1;
+		message.data = calloc(sizeof(char), message.dataSize);
+		memcpy(message.data, WELLCOME_MESSAGE, message.dataSize);
 
-		/* send_all(clientSocket, &message, ) */
+		res = send_message(clientSocket, &message, &len);
 	} while (1);
 
 	/* TODO: a lot of inner frees and close sockets */

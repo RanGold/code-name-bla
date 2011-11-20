@@ -36,11 +36,12 @@ typedef struct User {
 
 typedef struct Message {
 	MessageType messageType;
-	int size;
+	int dataSize;
 	unsigned char* data;
 } Message;
 
 void print_error();
 
-/* Inspired by: http://beej.us/guide/bgnet/output/html/singlepage/bgnet.html */
-int send_all(int targetSocket, Message *message);
+int send_message(int targetSocket, Message *message, unsigned int *len);
+
+int recv_message(int sourceSocket, Message *message, unsigned int *len);
