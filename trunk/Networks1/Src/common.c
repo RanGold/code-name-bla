@@ -94,6 +94,7 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 	message->data = calloc(message->dataSize, 1);
 	res = recv_all(sourceSocket, message->data, &bytesToRecv);
 	if (res == -1) {
+		free(message->data);
 		return -1;
 	} else {
 		*len += bytesToRecv;
