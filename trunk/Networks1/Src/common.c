@@ -115,3 +115,10 @@ int prepare_message_from_string (char* str, Message* message) {
 	return (message->data == NULL ? -1 : 0);
 }
 
+int prepare_string_from_message (char** str, Message* message) {
+
+	*str = (char*)message->data;
+
+	return 0;
+}
+
