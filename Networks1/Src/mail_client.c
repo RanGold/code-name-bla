@@ -7,15 +7,17 @@ int main(int argc, char** argv) {
 
 	/* Variables declaration */
 	short port = 6423;
-	char hostname[MAX_HOST_NAME_LEN] = "localhost", portString[10];
+	char hostname[MAX_HOST_NAME_LEN] = "localhost";
+	char portString[10];
 	struct in_addr tempServerAddr;
 	int clientSocket;
 	struct sockaddr_in serverAddr;
 	int isIP;
 	struct addrinfo hints, *servinfo;
-	int rv, res;
+	int res;
 	Message message;
 	unsigned int len;
+	char* stringMessage;
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
@@ -53,9 +55,9 @@ int main(int argc, char** argv) {
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
-	rv = getaddrinfo(argv[1], portString, &hints, &servinfo);
+	res = getaddrinfo(argv[1], portString, &hints, &servinfo);
 
-	if (rv != 0) {
+	if (res != 0) {
 		fprintf(stderr, "Error: Usage mail_client "
 			"[hostname [port]]\n");
 		freeaddrinfo(servinfo);
@@ -77,38 +79,11 @@ int main(int argc, char** argv) {
 		/* TODO : free stuff */
 		print_error();
 	} else {
-		printf((const char*)((void *)message.data));
+		prepare_string_from_message(&stringMessage, &message);
+		printf("%s", stringMessage);
+		free(message.data);
 	}
 
-	/*
-	 CHAR buf[256];
-	 ZeroMemory(buf,sizeof(buf));
-
-	 int nBytesToSend=sizeof(buf);
-	 int iPos=0;
-	 */
-
-	/*
-	//prepare buffer for incoming data
-	int nLeft = sizeof(buf);
-
-	// PROBLEM - While data is recieved no listen is happening other connection fails
-	do //loop till there are no more data
-	{
-		int nNumBytes = recv(hClientSocket, buf + iPos, nLeft, 0);
-
-		//check if cleint closed connection
-		if (!nNumBytes)
-			break;
-
-		assert(nNumBytes != SOCKET_ERROR);
-
-		//update free space and pointer to next byte
-		nLeft -= nNumBytes;
-		iPos += nNumBytes;
-
-	} while (1);
-*/
 	/* close connection and socket */
 	close(clientSocket);
 
