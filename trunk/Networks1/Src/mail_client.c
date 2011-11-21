@@ -56,8 +56,10 @@ int main(int argc, char** argv) {
 	res = recv_message(clientSocket, &message, &len);
 
 	if (res == -1 || message.messageType != string) {
-		/* TODO : free stuff */
+		close(clientSocket);
+		freeaddrinfo(servinfo);
 		print_error();
+		return (-1);
 	} else {
 		prepare_string_from_message(&stringMessage, &message);
 		printf("%s", stringMessage);
@@ -68,6 +70,6 @@ int main(int argc, char** argv) {
 	close(clientSocket);
 	freeaddrinfo(servinfo);
 
-	return 0;
+	return (0);
 }
 
