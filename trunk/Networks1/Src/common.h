@@ -47,4 +47,5 @@ int send_message(int targetSocket, Message *message, unsigned int *len);
 int recv_message(int sourceSocket, Message *message, unsigned int *len);
 
 int prepare_message_from_string (char* str, Message* message);
+
 int prepare_string_from_message (char** str, Message* message);

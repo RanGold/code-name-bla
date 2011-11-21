@@ -1,18 +1,17 @@
 #define MAX_HOST_NAME_LEN 256
-#define MAX_PORT_LEN 10
+#define MAX_PORT_LEN 7
+#define DEFAULT_HOST_NAME "localhost"
+#define DEFAULT_PORT "6423"
+#define CLIENT_USAGE_MSG "Error: Usage mail_client [hostname [port]]\n"
 
 #include "common.h"
 
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
-	short port = 6423;
-	char hostname[MAX_HOST_NAME_LEN] = "localhost";
-	char portString[10];
-	struct in_addr tempServerAddr;
+	char hostname[MAX_HOST_NAME_LEN + 1] = DEFAULT_HOST_NAME;
+	char portString[MAX_PORT_LEN + 1] = DEFAULT_PORT;
 	int clientSocket;
-	struct sockaddr_in serverAddr;
-	int isIP;
 	struct addrinfo hints, *servinfo;
 	int res;
 	Message message;
@@ -21,53 +20,34 @@ int main(int argc, char** argv) {
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
-		fprintf(stderr, "Error: Usage mail_client "
-			"[hostname [port]]\n");
+		fprintf(stderr, CLIENT_USAGE_MSG);
 		return (-1);
+	} else if (argc == 2) {
+		strncpy(hostname, argv[1], MAX_HOST_NAME_LEN);
+	} else if (argc == 3) {
+		strncpy(hostname, argv[1], MAX_HOST_NAME_LEN);
+		strncpy(portString, argv[2], MAX_PORT_LEN);
 	}
 
-	if (argc == 2) {
-		if ((inet_pton(AF_INET, argv[1], &serverAddr) == 0) && (atoi(argv[1])
-				!= 0)) {
-			fprintf(stderr, "Error: Usage mail_client "
-				"[hostname [port]]\n");
-			return (-1);
-		} else {
-			strcpy(hostname, argv[1]);
-		}
-	}
-
-	if (argc == 3) {
-		isIP = inet_pton(AF_INET, argv[1], &tempServerAddr);
-		if (((isIP == 0) && (atoi(argv[1]) != 0)) || (atoi(argv[2]) == 0)) {
-			fprintf(stderr, "Error: Usage mail_client "
-				"[hostname [port]]\n");
-			return (-1);
-		} else {
-			strcpy(hostname, argv[1]);
-			port = atoi(argv[2]);
-		}
+	/* Checking for address validity */
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	res = getaddrinfo(hostname, portString, &hints, &servinfo);
+	if (res != 0) {
+		/* TODO: add the printable error */
+		print_error();
+		fprintf(stderr, CLIENT_USAGE_MSG);
+		return (-1);
 	}
 
 	clientSocket = socket(PF_INET, SOCK_STREAM, 0);
 
-	sprintf(portString, "%d", port);
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
-	res = getaddrinfo(argv[1], portString, &hints, &servinfo);
-
-	if (res != 0) {
-		fprintf(stderr, "Error: Usage mail_client "
-			"[hostname [port]]\n");
-		freeaddrinfo(servinfo);
-		return (-1);
-	}
-
-	/* connect to server */
+	/* Connect to server */
 	res = connect(clientSocket, servinfo->ai_addr, servinfo->ai_addrlen);
 	if (res == -1) {
 		print_error();
+		fprintf(stderr, CLIENT_USAGE_MSG);
 		freeaddrinfo(servinfo);
 		return (-1);
 	}
@@ -86,6 +66,7 @@ int main(int argc, char** argv) {
 
 	/* close connection and socket */
 	close(clientSocket);
+	freeaddrinfo(servinfo);
 
 	return 0;
 }
