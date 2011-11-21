@@ -35,8 +35,7 @@ int main(int argc, char** argv) {
 	hints.ai_socktype = SOCK_STREAM;
 	res = getaddrinfo(hostname, portString, &hints, &servinfo);
 	if (res != 0) {
-		/* TODO: add the printable error */
-		print_error();
+		fprintf(stderr, "%s\n", gai_strerror(res));
 		fprintf(stderr, CLIENT_USAGE_MSG);
 		return (-1);
 	}
@@ -58,15 +57,17 @@ int main(int argc, char** argv) {
 	if (res == -1 || message.messageType != string) {
 		close(clientSocket);
 		freeaddrinfo(servinfo);
-		print_error();
+		if (res == -1) {
+			print_error();
+		}
 		return (-1);
 	} else {
 		prepare_string_from_message(&stringMessage, &message);
-		printf("%s", stringMessage);
+		printf("%s\n", stringMessage);
 		free(message.data);
 	}
 
-	/* close connection and socket */
+	/* Close connection and socket */
 	close(clientSocket);
 	freeaddrinfo(servinfo);
 
