@@ -1,6 +1,6 @@
 binFLAGS = -pedantic-errors -c -Wall -I ./Src/ -g -o ./Bin/
 testBinFLAGS = -ansi -pedantic-errors -c -Wall -I ./Src/ -g -o ./Bin/Tests/
-exeFLAGS = -ansi -pedantic-errors -Wall -Werror -g -lm -o
+exeFLAGS = -ansi -pedantic-errors -Wall -Werror -g -lm -o 
 testExeFLAGS = -ansi -pedantic-errors -Wall -Werror -g -lm -o ./Misc/Tests/
 allExe = mail_server mail_client
 

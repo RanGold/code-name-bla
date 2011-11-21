@@ -14,6 +14,8 @@ int main(int argc, char** argv) {
 	int isIP;
 	struct addrinfo hints, *servinfo;
 	int rv, res;
+	Message message;
+	unsigned int len;
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
@@ -33,7 +35,7 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	isIP = inet_pton(AF_INET, argv[1], &tempServerAddr);
+	isIP = inet_pton(AF_INET, hostname, &tempServerAddr);
 	if (argc == 3) {
 		if (((isIP == 0) && (atoi(argv[1]) != 0)) || (atoi(argv[2]) == 0)) {
 			fprintf(stderr, "Error: Usage mail_client "
@@ -66,6 +68,16 @@ int main(int argc, char** argv) {
 		print_error();
 		freeaddrinfo(servinfo);
 		return (-1);
+	}
+
+	/* Receiving welcome message */
+	res = recv_message(clientSocket, &message, &len);
+
+	if (res == -1 || message.messageType != string) {
+		/* TODO : free stuff */
+		print_error();
+	} else {
+		printf((const char*)((void *)message.data));
 	}
 
 	/*

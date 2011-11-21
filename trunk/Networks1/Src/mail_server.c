@@ -141,10 +141,7 @@ int main(int argc, char** argv) {
 		}
 
 		/* Preparing send data */
-		message.messageType = string;
-		message.dataSize = strlen(WELLCOME_MESSAGE) + 1;
-		message.data = calloc(sizeof(char), message.dataSize);
-		memcpy(message.data, WELLCOME_MESSAGE, message.dataSize);
+		res = prepare_message_from_string(WELLCOME_MESSAGE, &message);
 
 		res = send_message(clientSocket, &message, &len);
 	} while (1);

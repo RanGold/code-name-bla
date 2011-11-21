@@ -103,3 +103,15 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 	return 0;
 }
 
+int prepare_message_from_string (char* str, Message* message) {
+	message->messageType = string;
+	message->dataSize = strlen(str) + 1;
+
+	message->data = calloc(message->dataSize, 1);
+	if (message->data != NULL) {
+		memcpy(message->data, str, message->dataSize);
+	}
+
+	return (message->data == NULL ? -1 : 0);
+}
+
