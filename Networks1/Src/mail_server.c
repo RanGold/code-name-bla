@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
-	/* prepare address structure to bind listen socket */
+	/* prepare  address structure to bind listen socket */
 	serverAddr.sin_family = AF_INET;
 	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	serverAddr.sin_port = htons(port);
