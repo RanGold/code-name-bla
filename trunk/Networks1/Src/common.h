@@ -1,3 +1,7 @@
+#define MAX_NAME_LEN 50
+#define MAX_PASSWORD_LEN 50
+#define MAX_EMAILS 32000
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,8 +33,8 @@ typedef struct Mail {
 } Mail;
 
 typedef struct User {
-	char* name;
-	char* password;
+	char name[MAX_NAME_LEN];
+	char password[MAX_PASSWORD_LEN];
 	Mail* mails;
 } User;
 
@@ -41,6 +45,8 @@ typedef struct Message {
 } Message;
 
 void print_error();
+
+void print_error_message(char* message);
 
 int send_message(int targetSocket, Message *message, unsigned int *len);
 

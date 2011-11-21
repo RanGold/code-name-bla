@@ -1,7 +1,11 @@
 #include "common.h"
 
 void print_error() {
-	printf("error: %s", strerror(errno));
+	fprintf(stderr, "Error: %s\n", strerror(errno));
+}
+
+void print_error_message(char* message) {
+	fprintf(stderr, "Error: %s\n", message);
 }
 
 /* Source: http://beej.us/guide/bgnet/output/html/singlepage/bgnet.html */
