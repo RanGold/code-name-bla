@@ -37,8 +37,8 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	isIP = inet_pton(AF_INET, hostname, &tempServerAddr);
 	if (argc == 3) {
+		isIP = inet_pton(AF_INET, argv[1], &tempServerAddr);
 		if (((isIP == 0) && (atoi(argv[1]) != 0)) || (atoi(argv[2]) == 0)) {
 			fprintf(stderr, "Error: Usage mail_client "
 				"[hostname [port]]\n");
