@@ -126,7 +126,25 @@ int prepare_string_from_message (char** str, Message* message) {
 	return 0;
 }
 
+int prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message) {
 
-int prepare_message_from_credentials(char *userName, char *password, Message *message) {
-	return (-1);
+	credentials[0] = 0;
+	sprintf(credentials, "%s\t%s", userName, password);
+
+	message->messageType = Credentials;
+	message->dataSize = strlen(credentials);
+	message->data = (unsigned char*)credentials;
+
+	return (0);
+}
+
+int send_empty_message(int socket, MessageType type) {
+
+	Message message;
+	unsigned int len;
+
+	message.messageType = type;
+	message.dataSize = 0;
+
+	return (send_message(socket, &message, &len));
 }
