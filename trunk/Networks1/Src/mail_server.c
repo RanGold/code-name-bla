@@ -221,6 +221,7 @@ int main(int argc, char** argv) {
 					|| (send_message(clientSocket, &message, &len) == -1)) {
 				print_error();
 			} else {
+				/* TODO : decide how to handle when message send fails, maybe reset? */
 				do {
 					res = recv_message(clientSocket, &message, &len);
 					if (res == -1) {
