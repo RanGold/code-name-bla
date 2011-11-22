@@ -3,11 +3,32 @@
 #define MAX_PORT_LEN 7
 #define DEFAULT_HOST_NAME "localhost"
 #define DEFAULT_PORT "6423"
-#define CLIENT_USAGE_MSG "Error: Usage mail_client [hostname [port]]\n"
+#define CLIENT_USAGE_MESSAGE "Error: Usage mail_client [hostname [port]]\n"
 #define CREDENTIALS_USAGE_MESSAGE "Expected:\nUser: [username]\nPassword: [password]\n"
+#define WRONG_CREDENTIALS_MESSAGE "Wrong credentials\n"
 #define QUIT_MESSAGE "QUIT"
 
 #include "common.h"
+
+/* return -1 on error
+ *         1 on accept
+ *		   0 on reject */
+int recv_credentials_result (int sourceSocket, Message *message, unsigned int *len){
+	int res;
+
+	res = recv_message(sourceSocket, message, len);
+	if (res == -1){
+		return res;
+	}
+	if (message->messageType == CredentialsAccept){
+		return 1;
+	}
+	if (message->messageType == CredentialsDeny){
+		return 0;
+	} else {
+		return -1;
+	}
+}
 
 int main(int argc, char** argv) {
 
@@ -28,7 +49,7 @@ int main(int argc, char** argv) {
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
-		fprintf(stderr, CLIENT_USAGE_MSG);
+		fprintf(stderr, CLIENT_USAGE_MESSAGE);
 		return (-1);
 	} else if (argc == 2) {
 		strncpy(hostname, argv[1], MAX_HOST_NAME_LEN);
@@ -44,7 +65,7 @@ int main(int argc, char** argv) {
 	res = getaddrinfo(hostname, portString, &hints, &servinfo);
 	if (res != 0) {
 		fprintf(stderr, "%s\n", gai_strerror(res));
-		fprintf(stderr, CLIENT_USAGE_MSG);
+		fprintf(stderr,CLIENT_USAGE_MESSAGE);
 		return (-1);
 	}
 
@@ -54,7 +75,6 @@ int main(int argc, char** argv) {
 	res = connect(clientSocket, servinfo->ai_addr, servinfo->ai_addrlen);
 	if (res == -1) {
 		print_error();
-		fprintf(stderr, CLIENT_USAGE_MSG);
 		freeaddrinfo(servinfo);
 		return (-1);
 	}
@@ -76,7 +96,7 @@ int main(int argc, char** argv) {
 	}
 
 	do {
-		scanf("%s", input);
+		gets(input);
 		if (strcmp(input, QUIT_MESSAGE) == 0) {
 			if (send_empty_message(clientSocket, Quit) == 0) {
 				break;
@@ -84,22 +104,30 @@ int main(int argc, char** argv) {
 				print_error();
 				break;
 			}
-		} else if (isLoggedIn == 0) {
+		} else if (!isLoggedIn) {
 			if ((sscanf(input, "User: %s", userName) +
-					scanf("Password: %s", password)) != 2) {
+					scanf("Password: %s\n", password)) != 2) {
 				print_error_message(CREDENTIALS_USAGE_MESSAGE);
+				/*gets(input);  /* "flushing" stdin */
 			} else {
 				res = prepare_message_from_credentials(credentials, userName,
 						password, &message);
 
 				res = send_message(clientSocket, &message, &len);
 
+				res = recv_credentials_result(clientSocket, &message, &len);
+				if (res == 1){     /*TODO: need to check for -1 */
+					isLoggedIn = 1;
+				} else if (res == 0){
+					print_error_message(WRONG_CREDENTIALS_MESSAGE);
+				}
 				/*isLoggedIn*/
 			}
 		}
 	} while (1);
 
 	/* Close connection and socket */
+	/*TODO: maybe free Message data ?*/
 	close(clientSocket);
 	freeaddrinfo(servinfo);
 
