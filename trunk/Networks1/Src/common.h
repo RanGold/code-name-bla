@@ -13,8 +13,10 @@
 #include <errno.h>
 
 typedef enum MessageType {
-	string,
-	mail
+	String,
+	Credentials,
+	ShowInbox,
+	InboxContent
 } MessageType;
 
 typedef struct Attachment {
@@ -33,8 +35,9 @@ typedef struct Mail {
 } Mail;
 
 typedef struct User {
-	char name[MAX_NAME_LEN];
-	char password[MAX_PASSWORD_LEN];
+	char name[MAX_NAME_LEN + 1];
+	char password[MAX_PASSWORD_LEN + 1];
+	int mailAmount;
 	Mail* mails;
 } User;
 
@@ -46,12 +49,14 @@ typedef struct Message {
 
 void print_error();
 
-void print_error_message(char* message);
+void print_error_message(char *message);
 
 int send_message(int targetSocket, Message *message, unsigned int *len);
 
 int recv_message(int sourceSocket, Message *message, unsigned int *len);
 
-int prepare_message_from_string (char* str, Message* message);
+int prepare_message_from_string (char *str, Message *message);
 
-int prepare_string_from_message (char** str, Message* message);
+int prepare_string_from_message (char **str, Message *message);
+
+int prepare_message_from_credentials(char *userName, char *password, Message *message);

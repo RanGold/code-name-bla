@@ -55,13 +55,15 @@ int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
 
 	for (i = 0; i < *usersAmount; i++) {
 
-		fscanf(usersFile, "%s\t%s", (*users)[i].name, (*users)[i].password);
-		/* TODO: How to allocate mails */
-		/*(*users)[i].mails = calloc(MAX_MAILS_PER_USER, sizeof(Mail));*/
+		if (fscanf(usersFile, "%s\t%s", (*users)[i].name, (*users)[i].password) != 2) {
+			fclose(usersFile);
+			return (-1);
+		}
+
+		(*users)[i].mailAmount = 0;
 	}
 
 	fclose(usersFile);
-
 	return (0);
 }
 
@@ -89,7 +91,7 @@ int main(int argc, char** argv) {
 		print_error_message("Failed initiallizing users array");
 	}
 
-	/* create listen socket - needs to be same as the client */
+	/* Create listen socket - needs to be same as the client */
 	listenSocket = socket(PF_INET, SOCK_STREAM, 0);
 	if (listenSocket == -1) {
 		print_error();
@@ -107,6 +109,7 @@ int main(int argc, char** argv) {
 					sizeof(serverAddr));
 	if (res == -1) {
 		print_error();
+		close(listenSocket);
 		/* TODO: free stuff before */
 		return -1;
 	}
@@ -115,29 +118,29 @@ int main(int argc, char** argv) {
 	res = listen(listenSocket, 1);
 	if (res == -1) {
 		print_error();
+		close(listenSocket);
 		/* TODO: free stuff before */
 		return -1;
 	}
 
 	do {
 
-		/* prepare structure for client(dest) address */
+		/* Prepare structure for client(dest) address */
 		len = sizeof(clientAddr);
 
 		/* Start waiting till client connect */
 		clientSocket = accept(listenSocket, (struct sockaddr*) &clientAddr, &len);
 		if (clientSocket == -1) {
 			print_error();
-			/* TODO: free stuff before */
-			return -1;
+		} else {
+
+			/* Preparing send data */
+			res = prepare_message_from_string(WELLCOME_MESSAGE, &message);
+
+			res = send_message(clientSocket, &message, &len);
+
+			close(clientSocket);
 		}
-
-		/* Preparing send data */
-		res = prepare_message_from_string(WELLCOME_MESSAGE, &message);
-
-		res = send_message(clientSocket, &message, &len);
-
-		close(clientSocket);
 	} while (1);
 
 	/* TODO: a lot of inner frees and close sockets */
