@@ -17,6 +17,8 @@ int main(int argc, char** argv) {
 	Message message;
 	unsigned int len;
 	char* stringMessage;
+	char userName[MAX_NAME_LEN];
+	char password[MAX_PASSWORD_LEN];
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
@@ -54,7 +56,7 @@ int main(int argc, char** argv) {
 	/* Receiving welcome message */
 	res = recv_message(clientSocket, &message, &len);
 
-	if (res == -1 || message.messageType != string) {
+	if (res == -1 || message.messageType != String) {
 		close(clientSocket);
 		freeaddrinfo(servinfo);
 		if (res == -1) {
@@ -65,6 +67,16 @@ int main(int argc, char** argv) {
 		prepare_string_from_message(&stringMessage, &message);
 		printf("%s\n", stringMessage);
 		free(message.data);
+	}
+
+	if (scanf("User: %s\nPassword: %s", userName, password) != 2) {
+		print_error_message(
+				"Expected:\nUser: [username]\nPassword: [password]\n");
+		close(clientSocket);
+		freeaddrinfo(servinfo);
+		return (-1);
+	} else {
+		prepare_message_from_credentials(userName, password, &message);
 	}
 
 	/* Close connection and socket */

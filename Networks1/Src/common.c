@@ -108,7 +108,7 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 }
 
 int prepare_message_from_string (char* str, Message* message) {
-	message->messageType = string;
+	message->messageType = String;
 	message->dataSize = strlen(str) + 1;
 
 	message->data = calloc(message->dataSize, 1);
@@ -126,3 +126,7 @@ int prepare_string_from_message (char** str, Message* message) {
 	return 0;
 }
 
+
+int prepare_message_from_credentials(char *userName, char *password, Message *message) {
+	return (-1);
+}
