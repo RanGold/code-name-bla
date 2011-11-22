@@ -67,13 +67,36 @@ int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
 	return (0);
 }
 
+User* check_credentials_message(User* users, int userCount, Message *message) {
+
+	char userName[MAX_NAME_LEN + 1];
+	char password[MAX_PASSWORD_LEN + 1];
+	int i;
+
+	if (message->messageType != Credentials) {
+		return (NULL);
+	}
+
+	if (sscanf((char*)message->data, "%s\t%s", userName, password) != 2) {
+		return (NULL);
+	}
+
+	for (i = 0; i < userCount; i++) {
+		if ((strcmp(users[i].name, userName) == 0) && (strcmp(users[i].password, password) == 0)) {
+			return (users + i);
+		}
+	}
+
+	return (NULL);
+}
+
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
 	short port = 6423;
 	int usersAmount, res;
 	unsigned int len;
-	User* users = NULL;
+	User *users = NULL, *curUser = NULL;
 	int listenSocket, clientSocket;
 	struct sockaddr_in serverAddr, clientAddr;
 	Message message;
@@ -134,11 +157,28 @@ int main(int argc, char** argv) {
 			print_error();
 		} else {
 
-			/* Preparing send data */
 			res = prepare_message_from_string(WELLCOME_MESSAGE, &message);
 
 			res = send_message(clientSocket, &message, &len);
 
+			do {
+				res = recv_message(clientSocket, &message, &len);
+				/* TODO: check for quit message */
+
+				curUser = check_credentials_message(users, usersAmount, &message);
+
+				if (curUser == NULL) {
+					res = send_empty_message(clientSocket, CredentialsDeny);
+				} else {
+					res = send_empty_message(clientSocket, CredentialsAccept);
+				}
+				if (res == -1) {
+					break;
+				}
+
+			} while (curUser == NULL);
+
+			curUser = NULL;
 			close(clientSocket);
 		}
 	} while (1);

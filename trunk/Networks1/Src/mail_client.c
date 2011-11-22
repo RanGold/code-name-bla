@@ -1,8 +1,11 @@
 #define MAX_HOST_NAME_LEN 256
+#define MAX_INPUT_LEN 256
 #define MAX_PORT_LEN 7
 #define DEFAULT_HOST_NAME "localhost"
 #define DEFAULT_PORT "6423"
 #define CLIENT_USAGE_MSG "Error: Usage mail_client [hostname [port]]\n"
+#define CREDENTIALS_USAGE_MESSAGE "Expected:\nUser: [username]\nPassword: [password]\n"
+#define QUIT_MESSAGE "QUIT"
 
 #include "common.h"
 
@@ -17,8 +20,11 @@ int main(int argc, char** argv) {
 	Message message;
 	unsigned int len;
 	char* stringMessage;
-	char userName[MAX_NAME_LEN];
-	char password[MAX_PASSWORD_LEN];
+	char userName[MAX_NAME_LEN + 1];
+	char password[MAX_PASSWORD_LEN + 1];
+	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 2];
+	char input[MAX_INPUT_LEN + 1];
+	int isLoggedIn = 0;
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
@@ -69,15 +75,29 @@ int main(int argc, char** argv) {
 		free(message.data);
 	}
 
-	if (scanf("User: %s\nPassword: %s", userName, password) != 2) {
-		print_error_message(
-				"Expected:\nUser: [username]\nPassword: [password]\n");
-		close(clientSocket);
-		freeaddrinfo(servinfo);
-		return (-1);
-	} else {
-		prepare_message_from_credentials(userName, password, &message);
-	}
+	do {
+		scanf("%s", input);
+		if (strcmp(input, QUIT_MESSAGE) == 0) {
+			if (send_empty_message(clientSocket, Quit) == 0) {
+				break;
+			} else {
+				print_error();
+				break;
+			}
+		} else if (isLoggedIn == 0) {
+			if ((sscanf(input, "User: %s", userName) +
+					scanf("Password: %s", password)) != 2) {
+				print_error_message(CREDENTIALS_USAGE_MESSAGE);
+			} else {
+				res = prepare_message_from_credentials(credentials, userName,
+						password, &message);
+
+				res = send_message(clientSocket, &message, &len);
+
+				/*isLoggedIn*/
+			}
+		}
+	} while (1);
 
 	/* Close connection and socket */
 	close(clientSocket);
