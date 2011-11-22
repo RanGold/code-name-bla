@@ -206,6 +206,8 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
+	message.data = NULL;
+
 	do {
 
 		/* Prepare structure for client address */
@@ -257,6 +259,15 @@ int main(int argc, char** argv) {
 			}
 
 			curUser = NULL;
+			if (message.data != NULL) {
+				free(message.data);
+				message.data = NULL;
+			}
+
+			if (message.data != NULL) {
+				free(message.data);
+				message.data = NULL;
+			}
 			close(clientSocket);
 		}
 	} while (1);
