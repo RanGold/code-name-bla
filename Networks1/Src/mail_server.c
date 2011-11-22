@@ -67,7 +67,28 @@ int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
 	return (0);
 }
 
-User* check_credentials_message(User* users, int userCount, Message *message) {
+void free_users_array(User *users, int usersAmount) {
+
+	int i, j, k;
+
+	for (i = 0; i < usersAmount; i++) {
+		for (j = 0; j < users[i].mailAmount; j++) {
+			for (k = 0; k < users[i].mails[j].numAttachments; j++) {
+				free(users[i].mails[j].attachments[k].data);
+				free(users[i].mails[j].attachments[k].fileName);
+			}
+			free(users[i].mails[j].attachments);
+			free(users[i].mails[j].body);
+			free(users[i].mails[j].sender);
+			free(users[i].mails[j].subject);
+		}
+		free(users[i].mails);
+	}
+
+	free(users);
+}
+
+User* check_credentials_message(User* users, int usersAmount, Message *message) {
 
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
@@ -81,13 +102,52 @@ User* check_credentials_message(User* users, int userCount, Message *message) {
 		return (NULL);
 	}
 
-	for (i = 0; i < userCount; i++) {
+	for (i = 0; i < usersAmount; i++) {
 		if ((strcmp(users[i].name, userName) == 0) && (strcmp(users[i].password, password) == 0)) {
 			return (users + i);
 		}
 	}
 
 	return (NULL);
+}
+
+int prepare_message_from_inbox_content(User *user, Message* message) {
+
+	int i, messageSize = 1;
+	char temp[100];
+	char *messageText;
+
+	message->messageType = InboxContent;
+
+	/* Calculating message size */
+	for (i = 0; i < user->mailAmount; i++) {
+		/* Adding white spaces and apostrophes */
+		messageSize += 6;
+		sprintf(temp, "%d", user->mails[i].id);
+		messageSize += strlen(temp);
+		messageSize += strlen(user->mails[i].sender);
+		messageSize += strlen(user->mails[i].subject);
+		sprintf(temp, "%d", user->mails[i].numAttachments);
+		messageSize += strlen(temp);
+	}
+
+	messageText = (char*)calloc(messageSize, 1);
+	if (messageText == NULL) {
+		return (-1);
+	}
+
+	for (i = 0; i < user->mailAmount; i++) {
+		sprintf(messageText, "%d %s \"%s\" %d\n",
+				user->mails[i].id,
+				user->mails[i].sender,
+				user->mails[i].subject,
+				user->mails[i].numAttachments);
+	}
+
+	message->dataSize = messageSize;
+	message->data = (unsigned char*)messageText;
+
+	return (0);
 }
 
 int main(int argc, char** argv) {
@@ -118,7 +178,7 @@ int main(int argc, char** argv) {
 	listenSocket = socket(PF_INET, SOCK_STREAM, 0);
 	if (listenSocket == -1) {
 		print_error();
-		/* TODO: free stuff before */
+		free_users_array(users, usersAmount);
 		return (-1);
 	}
 
@@ -133,7 +193,7 @@ int main(int argc, char** argv) {
 	if (res == -1) {
 		print_error();
 		close(listenSocket);
-		/* TODO: free stuff before */
+		free_users_array(users, usersAmount);
 		return -1;
 	}
 
@@ -142,13 +202,13 @@ int main(int argc, char** argv) {
 	if (res == -1) {
 		print_error();
 		close(listenSocket);
-		/* TODO: free stuff before */
+		free_users_array(users, usersAmount);
 		return -1;
 	}
 
 	do {
 
-		/* Prepare structure for client(dest) address */
+		/* Prepare structure for client address */
 		len = sizeof(clientAddr);
 
 		/* Start waiting till client connect */
@@ -157,33 +217,51 @@ int main(int argc, char** argv) {
 			print_error();
 		} else {
 
-			res = prepare_message_from_string(WELLCOME_MESSAGE, &message);
+			if ((prepare_message_from_string(WELLCOME_MESSAGE, &message) == -1)
+					|| (send_message(clientSocket, &message, &len) == -1)) {
+				print_error();
+			} else {
+				do {
+					res = recv_message(clientSocket, &message, &len);
+					if (res == -1) {
+						print_error();
+						continue;
+					}
 
-			res = send_message(clientSocket, &message, &len);
+					if (message.messageType == Quit) {
+						break;
+					} else if (curUser == NULL) {
+						curUser = check_credentials_message(users, usersAmount,
+								&message);
 
-			do {
-				res = recv_message(clientSocket, &message, &len);
-				/* TODO: check for quit message */
+						if (curUser == NULL) {
+							res = send_empty_message(clientSocket,
+									CredentialsDeny);
+						} else {
+							res = send_empty_message(clientSocket,
+									CredentialsAccept);
+						}
 
-				curUser = check_credentials_message(users, usersAmount, &message);
-
-				if (curUser == NULL) {
-					res = send_empty_message(clientSocket, CredentialsDeny);
-				} else {
-					res = send_empty_message(clientSocket, CredentialsAccept);
-				}
-				if (res == -1) {
-					break;
-				}
-
-			} while (curUser == NULL);
+						if (res == -1) {
+							print_error();
+							break;
+						}
+					} else if (message.messageType == ShowInbox) {
+						if ((prepare_message_from_inbox_content(curUser, &message) == -1) ||
+								(send_message(clientSocket, &message, &len) == -1)) {
+							print_error();
+						}
+					}
+				} while (1);
+			}
 
 			curUser = NULL;
 			close(clientSocket);
 		}
 	} while (1);
 
-	/* TODO: a lot of inner frees and close sockets */
-	free(users);
+	/* Releasing resources */
+	free_users_array(users, usersAmount);
+	close(listenSocket);
 	return 0;
 }
