@@ -1,12 +1,23 @@
+/* system parameters */
 #define MAX_HOST_NAME_LEN 256
 #define MAX_INPUT_LEN 256
 #define MAX_PORT_LEN 7
 #define DEFAULT_HOST_NAME "localhost"
 #define DEFAULT_PORT "6423"
-#define CLIENT_USAGE_MESSAGE "Error: Usage mail_client [hostname [port]]"
+
+/* errors messages definitions */
+#define CLIENT_USAGE_MESSAGE "Usage mail_client [hostname [port]]"
 #define CREDENTIALS_USAGE_MESSAGE "Expected:\nUser: [username]\nPassword: [password]"
 #define WRONG_CREDENTIALS_MESSAGE "Wrong credentials"
+
+/* commands definitions */
 #define QUIT_MESSAGE "QUIT"
+#define SHOW_INBOX "SHOW_INBOX"
+
+/* general definitions */
+#define CONNECTION_SUCCEED "Connected to server"
+
+
 
 #include "common.h"
 
@@ -19,15 +30,20 @@ int recv_credentials_result (int sourceSocket, Message *message, unsigned int *l
 	res = recv_message(sourceSocket, message, len);
 	if (res == -1){
 		return res;
-	}
-	if (message->messageType == CredentialsAccept){
+	} else if (message->messageType == CredentialsAccept){
 		return 1;
-	}
-	if (message->messageType == CredentialsDeny){
+	} else if (message->messageType == CredentialsDeny){
 		return 0;
 	} else {
-		return -1;
+		return ERROR;
 	}
+}
+
+int send_credentials(char* userName, char* password,  int sourceSocket, Message *message, unsigned int *len){
+	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 2];
+
+	prepare_message_from_credentials(credentials, userName, password, message);
+	return (send_message(sourceSocket, message, len));
 }
 
 int main(int argc, char** argv) {
@@ -43,14 +59,14 @@ int main(int argc, char** argv) {
 	char* stringMessage;
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
-	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 2];
+
 	char input[MAX_INPUT_LEN + 1];
 	int isLoggedIn = 0;
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
-		fprintf(stderr, CLIENT_USAGE_MESSAGE);
-		return (-1);
+		print_error_message(CLIENT_USAGE_MESSAGE);
+		return ERROR ;
 	} else if (argc == 2) {
 		strncpy(hostname, argv[1], MAX_HOST_NAME_LEN);
 	} else if (argc == 3) {
@@ -65,34 +81,34 @@ int main(int argc, char** argv) {
 	res = getaddrinfo(hostname, portString, &hints, &servinfo);
 	if (res != 0) {
 		fprintf(stderr, "%s\n", gai_strerror(res));
-		fprintf(stderr,CLIENT_USAGE_MESSAGE);
-		return (-1);
+		print_error_message(CLIENT_USAGE_MESSAGE);
+		return ERROR;
 	}
 
 	clientSocket = socket(PF_INET, SOCK_STREAM, 0);
 
 	/* Connect to server */
 	res = connect(clientSocket, servinfo->ai_addr, servinfo->ai_addrlen);
-	if (res == -1) {
+	if (res == ERROR) {
 		print_error();
 		freeaddrinfo(servinfo);
-		return (-1);
+		return (ERROR);
 	}
 
 	/* Receiving welcome message */
 	res = recv_message(clientSocket, &message, &len);
 
-	if (res == -1 || message.messageType != String) {
+	if (res == ERROR || message.messageType != String) {
 		close(clientSocket);
 		freeaddrinfo(servinfo);
-		if (res == -1) {
+		if (res == ERROR) {
 			print_error();
 		}
-		return (-1);
+		return ERROR;
 	} else {
 		prepare_string_from_message(&stringMessage, &message);
 		printf("%s\n", stringMessage);
-		free(message.data);
+		free(stringMessage);
 	}
 
 	do {
@@ -109,20 +125,23 @@ int main(int argc, char** argv) {
 					scanf("Password: %s", password)) != 2) {
 				print_error_message(CREDENTIALS_USAGE_MESSAGE);
 			} else {
-				res = prepare_message_from_credentials(credentials, userName,
-						password, &message);
-
-				res = send_message(clientSocket, &message, &len);
+				res = send_credentials(userName, password, clientSocket, &message, &len);
 
 				res = recv_credentials_result(clientSocket, &message, &len);
-				if (res == 1){     /*TODO: need to check for -1 */
+
+				if (res == 1){     /*TODO: need to check for ERROR */
 					isLoggedIn = 1;
+					printf("Connected to server");
 				} else if (res == 0){
 					print_error_message(WRONG_CREDENTIALS_MESSAGE);
 				}
-				/*isLoggedIn*/
 			}
 			fgets(input, MAX_INPUT_LEN, stdin); /*flushing*/
+		} else {  /* user is logged in */
+			if (strcmp(input,SHOW_INBOX) == 0){
+
+			}
+
 		}
 
 	} while (1);

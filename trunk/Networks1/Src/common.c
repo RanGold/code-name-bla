@@ -119,14 +119,12 @@ int prepare_message_from_string (char* str, Message* message) {
 	return (message->data == NULL ? -1 : 0);
 }
 
-int prepare_string_from_message (char** str, Message* message) {
+void prepare_string_from_message (char** str, Message* message) {
 
 	*str = (char*)message->data;
-
-	return 0;
 }
 
-int prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message) {
+void prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message) {
 
 	credentials[0] = 0;
 	sprintf(credentials, "%s\t%s", userName, password);
@@ -134,8 +132,6 @@ int prepare_message_from_credentials(char* credentials, char *userName, char *pa
 	message->messageType = Credentials;
 	message->dataSize = strlen(credentials);
 	message->data = (unsigned char*)credentials;
-
-	return (0);
 }
 
 int send_empty_message(int socket, MessageType type) {

@@ -2,6 +2,7 @@
 #define MAX_PASSWORD_LEN 50
 #define MAX_EMAILS 32000
 #define SOCKET_CLOSED -2
+#define ERROR -1
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,8 +62,8 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len);
 
 int prepare_message_from_string (char *str, Message *message);
 
-int prepare_string_from_message (char **str, Message *message);
+void prepare_string_from_message (char **str, Message *message);
 
-int prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message);
+void prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message);
 
 int send_empty_message(int socket, MessageType type);
