@@ -3,9 +3,9 @@
 #define MAX_PORT_LEN 7
 #define DEFAULT_HOST_NAME "localhost"
 #define DEFAULT_PORT "6423"
-#define CLIENT_USAGE_MESSAGE "Error: Usage mail_client [hostname [port]]\n"
-#define CREDENTIALS_USAGE_MESSAGE "Expected:\nUser: [username]\nPassword: [password]\n"
-#define WRONG_CREDENTIALS_MESSAGE "Wrong credentials\n"
+#define CLIENT_USAGE_MESSAGE "Error: Usage mail_client [hostname [port]]"
+#define CREDENTIALS_USAGE_MESSAGE "Expected:\nUser: [username]\nPassword: [password]"
+#define WRONG_CREDENTIALS_MESSAGE "Wrong credentials"
 #define QUIT_MESSAGE "QUIT"
 
 #include "common.h"
@@ -46,6 +46,8 @@ int main(int argc, char** argv) {
 	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 2];
 	char input[MAX_INPUT_LEN + 1];
 	int isLoggedIn = 0;
+	int j=0;
+	char c;
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
@@ -106,10 +108,10 @@ int main(int argc, char** argv) {
 			}
 		} else if (!isLoggedIn) {
 			if ((sscanf(input, "User: %s", userName) +
-					scanf("Password: %s\n", password)) != 2) {
+					scanf("Password: %s", password)) != 2) {
 				print_error_message(CREDENTIALS_USAGE_MESSAGE);
-				/*gets(input);  /* "flushing" stdin */
 			} else {
+				gets(input); /*flushing*/
 				res = prepare_message_from_credentials(credentials, userName,
 						password, &message);
 
