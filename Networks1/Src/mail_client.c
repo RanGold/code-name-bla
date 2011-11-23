@@ -46,8 +46,6 @@ int main(int argc, char** argv) {
 	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 2];
 	char input[MAX_INPUT_LEN + 1];
 	int isLoggedIn = 0;
-	int j=0;
-	char c;
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
@@ -98,7 +96,7 @@ int main(int argc, char** argv) {
 	}
 
 	do {
-		gets(input);
+		fgets(input, MAX_INPUT_LEN, stdin);
 		if (strcmp(input, QUIT_MESSAGE) == 0) {
 			if (send_empty_message(clientSocket, Quit) == 0) {
 				break;
@@ -111,7 +109,6 @@ int main(int argc, char** argv) {
 					scanf("Password: %s", password)) != 2) {
 				print_error_message(CREDENTIALS_USAGE_MESSAGE);
 			} else {
-				gets(input); /*flushing*/
 				res = prepare_message_from_credentials(credentials, userName,
 						password, &message);
 
@@ -125,7 +122,9 @@ int main(int argc, char** argv) {
 				}
 				/*isLoggedIn*/
 			}
+			fgets(input, MAX_INPUT_LEN, stdin); /*flushing*/
 		}
+
 	} while (1);
 
 	/* Close connection and socket */
