@@ -1,6 +1,7 @@
 #define MAX_NAME_LEN 50
 #define MAX_PASSWORD_LEN 50
 #define MAX_EMAILS 32000
+#define SOCKET_CLOSED -2
 
 #include <stdio.h>
 #include <stdlib.h>
