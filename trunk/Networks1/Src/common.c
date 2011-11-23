@@ -60,8 +60,8 @@ int send_message(int targetSocket, Message *message, unsigned int *len) {
 	if (header == NULL) {
 		return (-1);
 	}
-	memcpy(header + 1, (&(message->dataSize)), sizeof(int));
 	memcpy(header, (&(message->messageType)), 1);
+	memcpy(header + 1, (&(message->dataSize)), sizeof(int));
 	res = send_all(targetSocket, header, &bytesToSend);
 	free(header);
 
@@ -98,9 +98,9 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 		return (-1);
 	}
 	res = recv_all(sourceSocket, header, &bytesToRecv);
-	memcpy((&(message->dataSize)), header + 1, sizeof(int));
 	message->messageType = 0;
 	memcpy((&(message->messageType)), header, 1);
+	memcpy((&(message->dataSize)), header + 1, sizeof(int));
 	free(header);
 
 	/* In case of an error we stop before sending the data */
