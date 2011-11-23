@@ -32,11 +32,11 @@ typedef struct Attachment {
 } Attachment;
 
 typedef struct Mail {
-	int id;
+	short id;
 	char* sender;
 	char* subject;
 	char* body;
-	int numAttachments;
+	unsigned char numAttachments;
 	Attachment* attachments;
 } Mail;
 
