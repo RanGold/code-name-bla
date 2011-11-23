@@ -203,7 +203,7 @@ int main(int argc, char** argv) {
 		print_error();
 		close(listenSocket);
 		free_users_array(users, usersAmount);
-		return -1;
+		return (-1);
 	}
 
 	message.data = NULL;
@@ -226,9 +226,11 @@ int main(int argc, char** argv) {
 				/* TODO : decide how to handle when message send fails, maybe reset? */
 				do {
 					res = recv_message(clientSocket, &message, &len);
-					if (res == -1) {
-						print_error();
-						continue;
+					if (res != 0) {
+						if (res == -1) {
+							print_error();
+						}
+						break;
 					}
 
 					if (message.messageType == Quit) {

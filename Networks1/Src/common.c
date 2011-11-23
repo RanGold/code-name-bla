@@ -36,7 +36,6 @@ int recv_all(int sourceSocket, unsigned char *buf, int *len) {
 	while (total < *len) {
 		n = recv(sourceSocket, buf + total, bytesleft, 0);
 		if (n == -1 || n == 0) {
-			n = -1;
 			break;
 		}
 		total += n;
@@ -45,7 +44,7 @@ int recv_all(int sourceSocket, unsigned char *buf, int *len) {
 
 	*len = total; /* Return number actually sent here */
 
-	return n == -1 ? -1 : 0; /* return -1 on failure, 0 on success */
+	return (n == -1 ? -1 : (n == 0 ? SOCKET_CLOSED : 0)); /* return -1 on failure, 0 on success */
 }
 
 int send_message(int targetSocket, Message *message, unsigned int *len) {
@@ -88,8 +87,8 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 	res = recv_all(sourceSocket, (void*) message, &bytesToRecv);
 
 	/* In case of an error we stop before sending the data */
-	if (res == -1) {
-		return -1;
+	if (res != 0) {
+		return res;
 	} else {
 		*len = bytesToRecv;
 	}
@@ -98,9 +97,9 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 	bytesToRecv = message->dataSize;
 	message->data = calloc(message->dataSize, 1);
 	res = recv_all(sourceSocket, message->data, &bytesToRecv);
-	if (res == -1) {
+	if (res != 0) {
 		free(message->data);
-		return -1;
+		return res;
 	} else {
 		*len += bytesToRecv;
 	}
