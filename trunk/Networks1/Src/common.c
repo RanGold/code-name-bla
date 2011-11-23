@@ -35,7 +35,8 @@ int recv_all(int sourceSocket, unsigned char *buf, int *len) {
 
 	while (total < *len) {
 		n = recv(sourceSocket, buf + total, bytesleft, 0);
-		if (n == -1) {
+		if (n == -1 || n == 0) {
+			n = -1;
 			break;
 		}
 		total += n;
