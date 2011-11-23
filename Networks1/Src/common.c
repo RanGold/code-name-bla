@@ -50,12 +50,20 @@ int recv_all(int sourceSocket, unsigned char *buf, int *len) {
 int send_message(int targetSocket, Message *message, unsigned int *len) {
 	int bytesToSend;
 	int res;
+	unsigned char* header;
 
 	*len = 0;
 
 	/* Sending header */
-	bytesToSend = sizeof(int) * 2;
-	res = send_all(targetSocket, (void*) message, &bytesToSend);
+	bytesToSend = sizeof(int) + 1;
+	header = calloc(bytesToSend, 1);
+	if (header == NULL) {
+		return (-1);
+	}
+	memcpy(header + 1, (&(message->dataSize)), sizeof(int));
+	memcpy(header, (&(message->messageType)), 1);
+	res = send_all(targetSocket, header, &bytesToSend);
+	free(header);
 
 	/* In case of an error we stop before sending the data */
 	if (res == -1) {
@@ -79,12 +87,21 @@ int send_message(int targetSocket, Message *message, unsigned int *len) {
 int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 	int bytesToRecv;
 	int res;
+	unsigned char* header;
 
 	*len = 0;
 
 	/* Receiving header */
-	bytesToRecv = sizeof(int) * 2;
-	res = recv_all(sourceSocket, (void*) message, &bytesToRecv);
+	bytesToRecv = sizeof(int) + 1;
+	header = calloc(bytesToRecv, 1);
+	if (header == NULL) {
+		return (-1);
+	}
+	res = recv_all(sourceSocket, header, &bytesToRecv);
+	memcpy((&(message->dataSize)), header + 1, sizeof(int));
+	message->messageType = 0;
+	memcpy((&(message->messageType)), header, 1);
+	free(header);
 
 	/* In case of an error we stop before sending the data */
 	if (res != 0) {
@@ -107,9 +124,9 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 	return 0;
 }
 
-int prepare_message_from_string (char* str, Message* message) {
+int prepare_message_from_string(char* str, Message* message) {
 	message->messageType = String;
-	message->dataSize = strlen(str) + 1;
+	message->dataSize = strlen(str);
 
 	message->data = calloc(message->dataSize, 1);
 	if (message->data != NULL) {
@@ -119,9 +136,11 @@ int prepare_message_from_string (char* str, Message* message) {
 	return (message->data == NULL ? -1 : 0);
 }
 
-void prepare_string_from_message (char** str, Message* message) {
-
-	*str = (char*)message->data;
+int prepare_string_from_message(char** str, Message* message) {
+	
+	*str = (char*)calloc(message->dataSize, 1);
+	free(message->data);
+	return (*str == NULL ? -1 : 0);
 }
 
 void prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message) {
@@ -143,4 +162,21 @@ int send_empty_message(int socket, MessageType type) {
 	message.dataSize = 0;
 
 	return (send_message(socket, &message, &len));
+}
+
+void free_mail_struct(Mail* mail) {
+
+	int i;
+	for (i = 0; i < mail->numAttachments; i++) {
+		free(mail->attachments[i].data);
+		free(mail->attachments[i].fileName);
+	}
+	free(mail->attachments);
+	free(mail->body);
+	free(mail->sender);
+	free(mail->subject);
+}
+
+int send_message_from_mail(Mail* mail) {
+	return 0;
 }

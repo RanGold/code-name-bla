@@ -103,6 +103,8 @@ int main(int argc, char** argv) {
 		freeaddrinfo(servinfo);
 		if (res == ERROR) {
 			print_error();
+		} else {
+			print_error_message("Expected string message got another");
 		}
 		return ERROR;
 	} else {
