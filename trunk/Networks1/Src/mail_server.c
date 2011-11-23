@@ -1,6 +1,6 @@
 #define MAX_ROW_LENGTH 256
 #define WELLCOME_MESSAGE "Welcome! I am simple-mail-server."
-#define SERVER_USAGE_MSG "Error: Usage mail_server <users_file> [port]\n"
+#define SERVER_USAGE_MSG "Usage mail_server <users_file> [port]"
 
 #include "common.h"
 
@@ -69,18 +69,11 @@ int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
 
 void free_users_array(User *users, int usersAmount) {
 
-	int i, j, k;
+	int i, j;
 
 	for (i = 0; i < usersAmount; i++) {
 		for (j = 0; j < users[i].mailAmount; j++) {
-			for (k = 0; k < users[i].mails[j].numAttachments; j++) {
-				free(users[i].mails[j].attachments[k].data);
-				free(users[i].mails[j].attachments[k].fileName);
-			}
-			free(users[i].mails[j].attachments);
-			free(users[i].mails[j].body);
-			free(users[i].mails[j].sender);
-			free(users[i].mails[j].subject);
+			free_mail_struct(users[i].mails + j);
 		}
 		free(users[i].mails);
 	}
@@ -163,7 +156,7 @@ int main(int argc, char** argv) {
 
 	/* Validate number of arguments */
 	if (argc != 2 && argc != 3) {
-		fprintf(stderr, SERVER_USAGE_MSG);
+		print_error_message(SERVER_USAGE_MSG);
 		return (-1);
 	} else if (argc == 3) {
 		port = (short) atoi(argv[2]);
