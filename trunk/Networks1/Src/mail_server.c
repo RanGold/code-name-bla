@@ -4,6 +4,28 @@
 
 #include "common.h"
 
+void create_stub(User *user){
+	Mail mail1, mail2, mail_deleted;
+	mail1.id = 1;
+	mail1.sender = "ran";
+	mail1.subject = "test";
+	mail1.numAttachments = 2;
+
+	mail2.id = 2;
+	mail2.sender = "amir";
+	mail2.subject = "test2";
+	mail2.numAttachments = 1;
+
+	mail_deleted.id = -1;
+
+	user->mails = calloc(3, sizeof(Mail));
+	user->mails[0] = mail1;
+	user->mails[1] = mail_deleted;
+	user->mails[2] = mail2;
+	user->mailAmount = 3;
+
+}
+
 /* Gets a file for reading */
 FILE* get_valid_file(char* fileName) {
 
@@ -16,6 +38,20 @@ FILE* get_valid_file(char* fileName) {
 
 	/* Return file */
 	return (file);
+}
+
+int calculate_inbox_info_size(User *user){
+	int i, messageSize =0;
+	for (i = 0; i < user->mailAmount; i++) {
+		if (user->mails[i].id != -1){
+			messageSize += sizeof(short);
+			messageSize += strlen(user->mails[i].sender);
+			messageSize += strlen(user->mails[i].subject);
+			messageSize += sizeof(unsigned char);
+			messageSize += (2 * sizeof(short));  /* +2 for 2 short numbers for lengths */
+		}
+	}
+	return messageSize;
 }
 
 int count_rows(FILE* file) {
@@ -106,23 +142,16 @@ User* check_credentials_message(User* users, int usersAmount, Message *message) 
 
 int prepare_message_from_inbox_content(User *user, Message* message) {
 
-	int i, messageSize = 1;
+	int i, messageSize = 0;
 	char temp[100];
 	char *messageText;
+	int placeToCopy =0;
+	short senderLength, subjectLength;
 
 	message->messageType = InboxContent;
 
 	/* Calculating message size */
-	for (i = 0; i < user->mailAmount; i++) {
-		/* Adding white spaces and apostrophes */
-		messageSize += 6;
-		sprintf(temp, "%d", user->mails[i].id);
-		messageSize += strlen(temp);
-		messageSize += strlen(user->mails[i].sender);
-		messageSize += strlen(user->mails[i].subject);
-		sprintf(temp, "%d", user->mails[i].numAttachments);
-		messageSize += strlen(temp);
-	}
+	messageSize = calculate_inbox_info_size(user);
 
 	messageText = (char*)calloc(messageSize, 1);
 	if (messageText == NULL) {
@@ -130,11 +159,23 @@ int prepare_message_from_inbox_content(User *user, Message* message) {
 	}
 
 	for (i = 0; i < user->mailAmount; i++) {
-		sprintf(messageText, "%d %s \"%s\" %d\n",
-				user->mails[i].id,
-				user->mails[i].sender,
-				user->mails[i].subject,
-				user->mails[i].numAttachments);
+		if (user->mails[i].id != -1){
+			senderLength = strlen(user->mails[i].sender) + 1;
+			subjectLength = strlen(user->mails[i].subject) + 1;
+
+			memcpy(messageText + placeToCopy, &user->mails[i].id, sizeof(short));
+			placeToCopy += sizeof(short);
+			memcpy(messageText + placeToCopy, &senderLength, sizeof(short));
+			placeToCopy += sizeof(short);
+			memcpy(messageText + placeToCopy, user->mails[i].sender, senderLength);
+			placeToCopy += senderLength;
+			memcpy(messageText + placeToCopy, &subjectLength, sizeof(short));
+			placeToCopy += sizeof(short);
+			memcpy(messageText + placeToCopy, user->mails[i].subject, subjectLength);
+			placeToCopy += subjectLength;
+			memcpy(messageText + placeToCopy, &user->mails[i].numAttachments, sizeof(unsigned char));
+			placeToCopy += sizeof(unsigned char);
+		}
 	}
 
 	message->dataSize = messageSize;
@@ -238,6 +279,7 @@ int main(int argc, char** argv) {
 						} else {
 							res = send_empty_message(clientSocket,
 									CredentialsAccept);
+							create_stub(curUser);
 						}
 
 						if (res == -1) {

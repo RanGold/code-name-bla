@@ -11,8 +11,8 @@
 #define WRONG_CREDENTIALS_MESSAGE "Wrong credentials"
 
 /* commands definitions */
-#define QUIT_MESSAGE "QUIT"
-#define SHOW_INBOX "SHOW_INBOX"
+#define QUIT_MESSAGE "QUIT\n"
+#define SHOW_INBOX "SHOW_INBOX\n"
 
 /* general definitions */
 #define CONNECTION_SUCCEED "Connected to server"
@@ -44,6 +44,56 @@ int send_credentials(char* userName, char* password,  int sourceSocket, Message 
 
 	prepare_message_from_credentials(credentials, userName, password, message);
 	return (send_message(sourceSocket, message, len));
+}
+
+int send_show_inbox(int sourceSocket){
+	return send_empty_message(sourceSocket,ShowInbox);
+}
+
+int recv_inbox_info(int sourceSocket, Message *message, unsigned int *len){
+	int res;
+
+	res = recv_message(sourceSocket, message, len);
+	if (res == ERROR){
+		return res;
+	} else if (message->messageType == InboxContent){
+		return 1;
+	} else {
+		return ERROR;
+	}
+}
+
+void print_inbox(Message *message){
+	int readSofar = 0;
+	Mail mail;
+	short senderLength, subjectLength;
+
+	while (message->dataSize > readSofar){
+		/* prepare id */
+		memcpy(&mail.id, message->data, sizeof(short));
+		readSofar += sizeof(short);
+
+		/* prepare sender */
+		memcpy(&senderLength, message->data + readSofar, sizeof(short));
+		readSofar += sizeof(short);
+		mail.sender = (char *)calloc(senderLength, 1);
+		memcpy(mail.sender, message->data + readSofar, senderLength);
+		readSofar += senderLength;
+
+		/* prepare subject */
+		memcpy(&subjectLength, message->data + readSofar, sizeof(short));
+		readSofar += sizeof(short);
+		mail.subject = (char *)calloc(subjectLength, 1);
+		memcpy(mail.subject, message->data + readSofar, subjectLength);
+		readSofar += subjectLength;
+
+		/* prepare number of attachments */
+		memcpy(&mail.numAttachments, message->data+readSofar,sizeof(unsigned char));
+		readSofar += sizeof(unsigned char);
+
+		printf("%d %s \"%s\" %d\n",mail.id, mail.sender, mail.subject, mail.numAttachments);
+	}
+
 }
 
 int main(int argc, char** argv) {
@@ -133,7 +183,7 @@ int main(int argc, char** argv) {
 
 				if (res == 1){     /*TODO: need to check for ERROR */
 					isLoggedIn = 1;
-					printf("Connected to server");
+					printf("Connected to server\n");
 				} else if (res == 0){
 					print_error_message(WRONG_CREDENTIALS_MESSAGE);
 				}
@@ -141,7 +191,11 @@ int main(int argc, char** argv) {
 			fgets(input, MAX_INPUT_LEN, stdin); /*flushing*/
 		} else {  /* user is logged in */
 			if (strcmp(input,SHOW_INBOX) == 0){
+				res = send_show_inbox(clientSocket);
 
+				res = recv_inbox_info(clientSocket, &message, &len);
+				/* TODO: need to check res != ERROR */
+				print_inbox(&message);
 			}
 
 		}
