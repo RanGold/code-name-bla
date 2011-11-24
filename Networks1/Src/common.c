@@ -139,6 +139,7 @@ int prepare_message_from_string(char* str, Message* message) {
 int prepare_string_from_message(char** str, Message* message) {
 	
 	*str = (char*)calloc(message->dataSize, 1);
+	strcpy(*str, (char *)message->data);
 	free(message->data);
 	return (*str == NULL ? -1 : 0);
 }
