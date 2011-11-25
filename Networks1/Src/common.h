@@ -65,8 +65,8 @@ int prepare_message_from_string (char *str, Message *message);
 
 int prepare_string_from_message (char **str, Message *message);
 
-void prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message);
-
 int send_empty_message(int socket, MessageType type);
 
 void free_mail_struct(Mail* mail);
+
+void free_message(Message *message);
