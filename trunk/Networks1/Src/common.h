@@ -30,7 +30,8 @@ typedef enum MessageType {
 	GetMail,
 	MailContent,
 	GetAttachment,
-	AttachmentContent
+	AttachmentContent,
+	InvalidID
 } MessageType;
 
 typedef struct Attachment {
