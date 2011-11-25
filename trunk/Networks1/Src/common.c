@@ -25,7 +25,7 @@ int send_all(int targetSocket, unsigned char *buf, int *len) {
 
 	*len = total; /* Return number actually sent here */
 
-	return n == -1 ? -1 : 0; /* return -1 on failure, 0 on success */
+	return n == -1 ? ERROR : 0; /* return ERROR on failure, 0 on success */
 }
 
 int recv_all(int sourceSocket, unsigned char *buf, int *len) {
@@ -44,7 +44,7 @@ int recv_all(int sourceSocket, unsigned char *buf, int *len) {
 
 	*len = total; /* Return number actually sent here */
 
-	return (n == -1 ? -1 : (n == 0 ? SOCKET_CLOSED : 0)); /* return -1 on failure, 0 on success */
+	return (n == -1 ? ERROR : (n == 0 ? SOCKET_CLOSED : 0)); /* return ERROR on failure, 0 on success */
 }
 
 int send_message(int targetSocket, Message *message, unsigned int *len) {
@@ -58,7 +58,7 @@ int send_message(int targetSocket, Message *message, unsigned int *len) {
 	bytesToSend = sizeof(int) + 1;
 	header = calloc(bytesToSend, 1);
 	if (header == NULL) {
-		return (-1);
+		return (ERROR);
 	}
 	memcpy(header, (&(message->messageType)), 1);
 	memcpy(header + 1, (&(message->dataSize)), sizeof(int));
@@ -66,19 +66,21 @@ int send_message(int targetSocket, Message *message, unsigned int *len) {
 	free(header);
 
 	/* In case of an error we stop before sending the data */
-	if (res == -1) {
-		return -1;
+	if (res == ERROR) {
+		return (ERROR);
 	} else {
 		*len = bytesToSend;
 	}
 
 	/* Sending data */
 	bytesToSend = message->dataSize;
-	res = send_all(targetSocket, message->data, &bytesToSend);
-	if (res == -1) {
-		return -1;
-	} else {
-		*len += bytesToSend;
+	if (bytesToSend > 0) {
+		res = send_all(targetSocket, message->data, &bytesToSend);
+		if (res == ERROR) {
+			return (ERROR);
+		} else {
+			*len += bytesToSend;
+		}
 	}
 
 	return 0;
@@ -95,30 +97,33 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 	bytesToRecv = sizeof(int) + 1;
 	header = calloc(bytesToRecv, 1);
 	if (header == NULL) {
-		return (-1);
+		return (ERROR);
 	}
 	res = recv_all(sourceSocket, header, &bytesToRecv);
-	message->messageType = 0;
-	memcpy((&(message->messageType)), header, 1);
-	memcpy((&(message->dataSize)), header + 1, sizeof(int));
-	free(header);
 
 	/* In case of an error we stop before sending the data */
 	if (res != 0) {
-		return res;
+		free(header);
+		return (res);
 	} else {
+		message->messageType = 0;
+		memcpy((&(message->messageType)), header, 1);
+		memcpy((&(message->dataSize)), header + 1, sizeof(message->dataSize));
+		free(header);
 		*len = bytesToRecv;
 	}
 
 	/* Receiving data */
 	bytesToRecv = message->dataSize;
-	message->data = calloc(message->dataSize, 1);
-	res = recv_all(sourceSocket, message->data, &bytesToRecv);
-	if (res != 0) {
-		free(message->data);
-		return res;
-	} else {
-		*len += bytesToRecv;
+	if (bytesToRecv > 0) {
+		message->data = calloc(message->dataSize, 1);
+		res = recv_all(sourceSocket, message->data, &bytesToRecv);
+		if (res != 0) {
+			free(message->data);
+			return res;
+		} else {
+			*len += bytesToRecv;
+		}
 	}
 
 	return 0;
@@ -133,25 +138,16 @@ int prepare_message_from_string(char* str, Message* message) {
 		memcpy(message->data, str, message->dataSize);
 	}
 
-	return (message->data == NULL ? -1 : 0);
+	return (message->data == NULL ? ERROR : 0);
 }
 
 int prepare_string_from_message(char** str, Message* message) {
 	
-	*str = (char*)calloc(message->dataSize, 1);
-	strcpy(*str, (char *)message->data);
-	free(message->data);
-	return (*str == NULL ? -1 : 0);
-}
-
-void prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message) {
-
-	credentials[0] = 0;
-	sprintf(credentials, "%s\t%s", userName, password);
-
-	message->messageType = Credentials;
-	message->dataSize = strlen(credentials);
-	message->data = (unsigned char*)credentials;
+	*str = (char*)calloc(message->dataSize + 1, 1);
+	/* The string will be valid because the calloc inputed 0 on its end */
+	memcpy(*str, message->data, message->dataSize);
+	free_message(message);
+	return (*str == NULL ? ERROR : 0);
 }
 
 int send_empty_message(int socket, MessageType type) {
@@ -178,6 +174,10 @@ void free_mail_struct(Mail* mail) {
 	free(mail->subject);
 }
 
-int send_message_from_mail(Mail* mail) {
-	return 0;
+void free_message(Message *message) {
+	if (message->data != NULL) {
+		free(message->data);
+		message->data = NULL;
+		message->dataSize = 0;
+	}
 }

@@ -13,6 +13,7 @@
 /* commands definitions */
 #define QUIT_MESSAGE "QUIT\n"
 #define SHOW_INBOX "SHOW_INBOX\n"
+#define GET_MAIL "GET_MAIL "
 
 /* general definitions */
 #define CONNECTION_SUCCEED "Connected to server"
@@ -21,14 +22,14 @@
 
 #include "common.h"
 
-/* return -1 on error
+/* return ERROR on error
  *         1 on accept
  *		   0 on reject */
 int recv_credentials_result (int sourceSocket, Message *message, unsigned int *len){
 	int res;
 
 	res = recv_message(sourceSocket, message, len);
-	if (res == -1){
+	if (res != 0){
 		return res;
 	} else if (message->messageType == CredentialsAccept){
 		return 1;
@@ -37,6 +38,16 @@ int recv_credentials_result (int sourceSocket, Message *message, unsigned int *l
 	} else {
 		return ERROR;
 	}
+}
+
+void prepare_message_from_credentials(char* credentials, char *userName, char *password, Message *message) {
+
+	credentials[0] = 0;
+	sprintf(credentials, "%s\t%s", userName, password);
+
+	message->messageType = Credentials;
+	message->dataSize = strlen(credentials);
+	message->data = (unsigned char*)credentials;
 }
 
 int send_credentials(char* userName, char* password,  int sourceSocket, Message *message, unsigned int *len){
@@ -54,48 +65,58 @@ int recv_inbox_info(int sourceSocket, Message *message, unsigned int *len){
 	int res;
 
 	res = recv_message(sourceSocket, message, len);
-	if (res == ERROR){
+	if (res != 0){
 		return res;
 	} else if (message->messageType == InboxContent){
-		return 1;
+		return 0;
 	} else {
 		return ERROR;
 	}
 }
 
-void print_inbox(Message *message){
-	int readSofar = 0;
+int print_inbox_info(Message *message){
+	int readSoFar = 0;
 	Mail mail;
-	short senderLength, subjectLength;
+	int senderLength, subjectLength;
 
-	while (message->dataSize > readSofar){
+	while (message->dataSize > readSoFar){
 		/* prepare id */
-		memcpy(&mail.id, message->data, sizeof(short));
-		readSofar += sizeof(short);
+		memcpy(&(mail.id), message->data + readSoFar, sizeof(mail.id));
+		readSoFar += sizeof(mail.id);
 
 		/* prepare sender */
-		memcpy(&senderLength, message->data + readSofar, sizeof(short));
-		readSofar += sizeof(short);
-		mail.sender = (char *)calloc(senderLength, 1);
-		memcpy(mail.sender, message->data + readSofar, senderLength);
-		readSofar += senderLength;
+		senderLength = strlen((char*)(message->data + readSoFar)) + 1;
+		mail.sender = (char*)calloc(senderLength, 1);
+		if (mail.sender == NULL) {
+			return (ERROR);
+		}
+		memcpy(mail.sender, message->data + readSoFar, senderLength);
+		readSoFar += senderLength;
 
 		/* prepare subject */
-		memcpy(&subjectLength, message->data + readSofar, sizeof(short));
-		readSofar += sizeof(short);
-		mail.subject = (char *)calloc(subjectLength, 1);
-		memcpy(mail.subject, message->data + readSofar, subjectLength);
-		readSofar += subjectLength;
+		subjectLength = strlen((char*)(message->data + readSoFar)) + 1;
+		mail.subject = (char*)calloc(subjectLength, 1);
+		if (mail.subject == NULL) {
+			free(mail.sender);
+			return (ERROR);
+		}
+		memcpy(mail.subject, message->data + readSoFar, subjectLength);
+		readSoFar += subjectLength;
 
 		/* prepare number of attachments */
-		memcpy(&mail.numAttachments, message->data+readSofar,sizeof(unsigned char));
-		readSofar += sizeof(unsigned char);
+		memcpy(&(mail.numAttachments), message->data + readSoFar, sizeof(mail.numAttachments));
+		readSoFar += sizeof(mail.numAttachments);
 
 		printf("%d %s \"%s\" %d\n",mail.id, mail.sender, mail.subject, mail.numAttachments);
+		free(mail.sender);
+		mail.sender = NULL;
+		free(mail.subject);
+		mail.subject = NULL;
 	}
 
+	return (0);
 }
-
+/* TODO: make sure whenever error this returns -1 */
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
@@ -109,14 +130,14 @@ int main(int argc, char** argv) {
 	char* stringMessage;
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
-
 	char input[MAX_INPUT_LEN + 1];
 	int isLoggedIn = 0;
+	int mailID, attachmentID;
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
 		print_error_message(CLIENT_USAGE_MESSAGE);
-		return ERROR ;
+		return (ERROR);
 	} else if (argc == 2) {
 		strncpy(hostname, argv[1], MAX_HOST_NAME_LEN);
 	} else if (argc == 3) {
@@ -151,6 +172,7 @@ int main(int argc, char** argv) {
 	if (res == ERROR || message.messageType != String) {
 		close(clientSocket);
 		freeaddrinfo(servinfo);
+		free_message(&message);
 		if (res == ERROR) {
 			print_error();
 		} else {
@@ -170,7 +192,11 @@ int main(int argc, char** argv) {
 				break;
 			} else {
 				print_error();
-				break;
+				break;if ((recv_inbox_info(clientSocket, &message, &len) != 0) ||
+						(print_inbox_info(&message) != 0)) {
+					print_error();
+					break;
+				}
 			}
 		} else if (!isLoggedIn) {
 			if ((sscanf(input, "User: %s", userName) +
@@ -178,32 +204,48 @@ int main(int argc, char** argv) {
 				print_error_message(CREDENTIALS_USAGE_MESSAGE);
 			} else {
 				res = send_credentials(userName, password, clientSocket, &message, &len);
+				if (res == ERROR) {
+					print_error();
+					break;
+				}
 
 				res = recv_credentials_result(clientSocket, &message, &len);
 
-				if (res == 1){     /*TODO: need to check for ERROR */
+				if (res == 1) {
 					isLoggedIn = 1;
 					printf("Connected to server\n");
-				} else if (res == 0){
+				} else if (res == 0) {
 					print_error_message(WRONG_CREDENTIALS_MESSAGE);
+				} else {
+					print_error();
+					break;
 				}
 			}
 			fgets(input, MAX_INPUT_LEN, stdin); /*flushing*/
-		} else {  /* user is logged in */
-			if (strcmp(input,SHOW_INBOX) == 0){
-				res = send_show_inbox(clientSocket);
-
-				res = recv_inbox_info(clientSocket, &message, &len);
-				/* TODO: need to check res != ERROR */
-				print_inbox(&message);
+		} else if (strcmp(input, SHOW_INBOX) == 0) {
+			res = send_show_inbox(clientSocket);
+			if (res == ERROR) {
+				print_error();
+				break;
 			}
 
+			if ((recv_inbox_info(clientSocket, &message, &len) != 0)
+					|| (print_inbox_info(&message) != 0)) {
+				print_error();
+				break;
+			}
+		} else if (sscanf(input, GET_MAIL "%d", &mailID) == 1) {
+
+		} else {
+			print_error_message("Invalid command");
 		}
 
+		free_message(&message);
 	} while (1);
 
 	/* Close connection and socket */
 	/*TODO: maybe free Message data ?*/
+	free_message(&message);
 	close(clientSocket);
 	freeaddrinfo(servinfo);
 
