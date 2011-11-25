@@ -1,8 +1,12 @@
 #define MAX_NAME_LEN 50
 #define MAX_PASSWORD_LEN 50
 #define MAX_EMAILS 32000
-#define SOCKET_CLOSED -2
+
+/* Errors */
 #define ERROR -1
+#define ERROR_SOCKET_CLOSED -2
+#define ERROR_LOGICAL -3
+#define INVALID_DATA_MESSAGE "Invalid data received"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +26,11 @@ typedef enum MessageType {
 	CredentialsDeny,
 	ShowInbox,
 	InboxContent,
-	Compose
+	Compose,
+	GetMail,
+	MailContent,
+	GetAttachment,
+	AttachmentContent
 } MessageType;
 
 typedef struct Attachment {
@@ -57,9 +65,9 @@ void print_error();
 
 void print_error_message(char *message);
 
-int send_message(int targetSocket, Message *message, unsigned int *len);
+int send_message(int targetSocket, Message *message);
 
-int recv_message(int sourceSocket, Message *message, unsigned int *len);
+int recv_message(int sourceSocket, Message *message);
 
 int prepare_message_from_string (char *str, Message *message);
 

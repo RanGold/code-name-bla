@@ -7,19 +7,31 @@
 /* TODO: delete this */
 void create_stub(User *user){
 	Mail mail1, mail2, mail_deleted;
+	FILE* file;
+
 	mail1.id = 1;
 	mail1.sender = calloc(4, 1);
 	strcpy(mail1.sender, "ran");
 	mail1.subject = calloc(5, 1);
 	strcpy(mail1.subject, "test");
-	mail1.numAttachments = 2;
+	mail1.body = calloc(strlen("this is a test message"), 1);
+	strcpy(mail1.body, "this is a test message");
+	mail1.numAttachments = 1;
+	mail1.attachments = calloc(1, sizeof(Attachment));
+	mail1.attachments[0].size = 27;
+	mail1.attachments[0].fileName = calloc(6, 1);
+	strcpy(mail1.attachments[0].fileName, "users");
+	mail1.attachments[0].data = calloc(27,1);
+	file = fopen("/home/student/EclipseWorkspace/Networks1/users", "r");
+	fread(mail1.attachments[0].data, 27, 1, file);
+	fclose(file);
 
 	mail2.id = 2;
 	mail2.sender = calloc(5, 1);
 	strcpy(mail2.sender, "amir");
 	mail2.subject = calloc(6, 1);
 	strcpy(mail2.subject, "test2");
-	mail2.numAttachments = 1;
+	mail2.numAttachments = 3;
 
 	mail_deleted.id = -1;
 
@@ -252,18 +264,21 @@ int main(int argc, char** argv) {
 			print_error();
 		} else {
 
-			if ((prepare_message_from_string(WELLCOME_MESSAGE, &message) == ERROR)
-					|| (send_message(clientSocket, &message, &len) == ERROR)) {
+			if ((prepare_message_from_string(WELLCOME_MESSAGE, &message) != 0)
+					|| (send_message(clientSocket, &message) != 0)) {
 				print_error();
 			} else {
 
 				free_message(&message);
 
 				do {
-					res = recv_message(clientSocket, &message, &len);
+					res = recv_message(clientSocket, &message);
 					if (res != 0) {
 						if (res == ERROR) {
 							print_error();
+						}
+						if (res == ERROR_LOGICAL) {
+							print_error_message(INVALID_DATA_MESSAGE);
 						}
 						break;
 					}
@@ -287,10 +302,13 @@ int main(int argc, char** argv) {
 						if (res == ERROR) {
 							print_error();
 							break;
+						} else if (res == ERROR_LOGICAL) {
+							print_error_message(INVALID_DATA_MESSAGE);
+							break;
 						}
 					} else if (message.messageType == ShowInbox) {
-						if ((prepare_message_from_inbox_content(curUser, &message) == ERROR) ||
-								(send_message(clientSocket, &message, &len) == ERROR)) {
+						if ((prepare_message_from_inbox_content(curUser, &message) != 0) ||
+								(send_message(clientSocket, &message) != 0)) {
 							print_error();
 						}
 					}
