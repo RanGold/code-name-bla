@@ -44,15 +44,14 @@ int recv_all(int sourceSocket, unsigned char *buf, int *len) {
 
 	*len = total; /* Return number actually sent here */
 
-	return (n == -1 ? ERROR : (n == 0 ? SOCKET_CLOSED : 0)); /* return ERROR on failure, 0 on success */
+	return (n == -1 ? ERROR : (n == 0 ? ERROR_SOCKET_CLOSED : 0));
 }
 
-int send_message(int targetSocket, Message *message, unsigned int *len) {
+int send_message(int targetSocket, Message *message) {
 	int bytesToSend;
 	int res;
 	unsigned char* header;
-
-	*len = 0;
+	unsigned int len = 0;
 
 	/* Sending header */
 	bytesToSend = sizeof(int) + 1;
@@ -69,7 +68,7 @@ int send_message(int targetSocket, Message *message, unsigned int *len) {
 	if (res == ERROR) {
 		return (ERROR);
 	} else {
-		*len = bytesToSend;
+		len = bytesToSend;
 	}
 
 	/* Sending data */
@@ -79,19 +78,18 @@ int send_message(int targetSocket, Message *message, unsigned int *len) {
 		if (res == ERROR) {
 			return (ERROR);
 		} else {
-			*len += bytesToSend;
+			len += bytesToSend;
 		}
 	}
 
-	return 0;
+	return (len == message->dataSize ? 0 : ERROR_LOGICAL);
 }
 
-int recv_message(int sourceSocket, Message *message, unsigned int *len) {
+int recv_message(int sourceSocket, Message *message) {
 	int bytesToRecv;
 	int res;
 	unsigned char* header;
-
-	*len = 0;
+	unsigned int len = 0;
 
 	/* Receiving header */
 	bytesToRecv = sizeof(int) + 1;
@@ -110,7 +108,7 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 		memcpy((&(message->messageType)), header, 1);
 		memcpy((&(message->dataSize)), header + 1, sizeof(message->dataSize));
 		free(header);
-		*len = bytesToRecv;
+		len = bytesToRecv;
 	}
 
 	/* Receiving data */
@@ -122,11 +120,11 @@ int recv_message(int sourceSocket, Message *message, unsigned int *len) {
 			free(message->data);
 			return res;
 		} else {
-			*len += bytesToRecv;
+			len += bytesToRecv;
 		}
 	}
 
-	return 0;
+	return (len == message->dataSize ? 0 : ERROR_LOGICAL);
 }
 
 int prepare_message_from_string(char* str, Message* message) {
@@ -153,12 +151,11 @@ int prepare_string_from_message(char** str, Message* message) {
 int send_empty_message(int socket, MessageType type) {
 
 	Message message;
-	unsigned int len;
 
 	message.messageType = type;
 	message.dataSize = 0;
 
-	return (send_message(socket, &message, &len));
+	return (send_message(socket, &message));
 }
 
 void free_mail_struct(Mail* mail) {

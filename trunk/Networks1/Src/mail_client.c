@@ -25,10 +25,10 @@
 /* return ERROR on error
  *         1 on accept
  *		   0 on reject */
-int recv_credentials_result (int sourceSocket, Message *message, unsigned int *len){
+int recv_credentials_result (int sourceSocket, Message *message){
 	int res;
 
-	res = recv_message(sourceSocket, message, len);
+	res = recv_message(sourceSocket, message);
 	if (res != 0){
 		return res;
 	} else if (message->messageType == CredentialsAccept){
@@ -50,21 +50,21 @@ void prepare_message_from_credentials(char* credentials, char *userName, char *p
 	message->data = (unsigned char*)credentials;
 }
 
-int send_credentials(char* userName, char* password,  int sourceSocket, Message *message, unsigned int *len){
+int send_credentials(char* userName, char* password,  int sourceSocket, Message *message){
 	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 2];
 
 	prepare_message_from_credentials(credentials, userName, password, message);
-	return (send_message(sourceSocket, message, len));
+	return (send_message(sourceSocket, message));
 }
 
 int send_show_inbox(int sourceSocket){
 	return send_empty_message(sourceSocket,ShowInbox);
 }
 
-int recv_inbox_info(int sourceSocket, Message *message, unsigned int *len){
+int recv_inbox_info(int sourceSocket, Message *message) {
 	int res;
 
-	res = recv_message(sourceSocket, message, len);
+	res = recv_message(sourceSocket, message);
 	if (res != 0){
 		return res;
 	} else if (message->messageType == InboxContent){
@@ -116,6 +116,21 @@ int print_inbox_info(Message *message){
 
 	return (0);
 }
+
+int send_get_mail_message(int clientSocket, int mailID, Message* message) {
+
+	message->messageType = GetMail;
+	message->dataSize = sizeof(short);
+
+	message->data = calloc(message->dataSize, 1);
+	if (message->data == NULL) {
+		return (ERROR);
+	}
+	memcpy(message->data, &mailID, message->dataSize);
+
+	return (send_message(clientSocket, message));
+}
+
 /* TODO: make sure whenever error this returns -1 */
 int main(int argc, char** argv) {
 
@@ -126,7 +141,6 @@ int main(int argc, char** argv) {
 	struct addrinfo hints, *servinfo;
 	int res;
 	Message message;
-	unsigned int len;
 	char* stringMessage;
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
@@ -167,16 +181,18 @@ int main(int argc, char** argv) {
 	}
 
 	/* Receiving welcome message */
-	res = recv_message(clientSocket, &message, &len);
+	res = recv_message(clientSocket, &message);
 
-	if (res == ERROR || message.messageType != String) {
+	if (res != 0 || message.messageType != String) {
 		close(clientSocket);
 		freeaddrinfo(servinfo);
 		free_message(&message);
 		if (res == ERROR) {
 			print_error();
+		} else if (res == ERROR_LOGICAL) {
+			print_error_message(INVALID_DATA_MESSAGE);
 		} else {
-			print_error_message("Expected string message got another");
+			print_error_message(INVALID_DATA_MESSAGE);
 		}
 		return ERROR;
 	} else {
@@ -190,32 +206,38 @@ int main(int argc, char** argv) {
 		if (strcmp(input, QUIT_MESSAGE) == 0) {
 			if (send_empty_message(clientSocket, Quit) == 0) {
 				break;
-			} else {
+			} else if (res == ERROR) {
 				print_error();
-				break;if ((recv_inbox_info(clientSocket, &message, &len) != 0) ||
-						(print_inbox_info(&message) != 0)) {
-					print_error();
-					break;
-				}
+				break;
+			} else if (res == ERROR_LOGICAL) {
+				print_error_message(INVALID_DATA_MESSAGE);
+				break;
+			} else {
+				break;
 			}
 		} else if (!isLoggedIn) {
 			if ((sscanf(input, "User: %s", userName) +
 					scanf("Password: %s", password)) != 2) {
 				print_error_message(CREDENTIALS_USAGE_MESSAGE);
 			} else {
-				res = send_credentials(userName, password, clientSocket, &message, &len);
+				res = send_credentials(userName, password, clientSocket, &message);
 				if (res == ERROR) {
 					print_error();
 					break;
+				} else if (res == ERROR_LOGICAL) {
+					print_error_message(INVALID_DATA_MESSAGE);
+					break;
 				}
 
-				res = recv_credentials_result(clientSocket, &message, &len);
-
+				res = recv_credentials_result(clientSocket, &message);
 				if (res == 1) {
 					isLoggedIn = 1;
 					printf("Connected to server\n");
 				} else if (res == 0) {
 					print_error_message(WRONG_CREDENTIALS_MESSAGE);
+				} if (res == ERROR_LOGICAL) {
+					print_error_message(INVALID_DATA_MESSAGE);
+					break;
 				} else {
 					print_error();
 					break;
@@ -227,15 +249,28 @@ int main(int argc, char** argv) {
 			if (res == ERROR) {
 				print_error();
 				break;
+			} else if (res == ERROR_LOGICAL) {
+				print_error_message(INVALID_DATA_MESSAGE);
+				break;
 			}
 
-			if ((recv_inbox_info(clientSocket, &message, &len) != 0)
+			if ((recv_inbox_info(clientSocket, &message) != 0)
 					|| (print_inbox_info(&message) != 0)) {
 				print_error();
 				break;
 			}
 		} else if (sscanf(input, GET_MAIL "%d", &mailID) == 1) {
+			res = send_get_mail_message(clientSocket, mailID, &message);
+			if (res == ERROR) {
+				print_error();
+				break;
+			} else if (res == ERROR_LOGICAL) {
+				print_error_message(INVALID_DATA_MESSAGE);
+				break;
+			}
+			free_message(&message);
 
+			/*receive_mail_message(clientSocket, &message); */
 		} else {
 			print_error_message("Invalid command");
 		}
