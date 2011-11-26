@@ -48,13 +48,13 @@ int recv_all(int sourceSocket, unsigned char *buf, int *len) {
 }
 
 int send_message(int targetSocket, Message *message) {
-	int bytesToSend;
+	int bytesToSend, headerSize;
 	int res;
 	unsigned char* header;
 	unsigned int len = 0;
 
 	/* Sending header */
-	bytesToSend = sizeof(int) + 1;
+	headerSize = bytesToSend = sizeof(int) + 1;
 	header = calloc(bytesToSend, 1);
 	if (header == NULL) {
 		return (ERROR);
@@ -82,17 +82,17 @@ int send_message(int targetSocket, Message *message) {
 		}
 	}
 
-	return (len == message->dataSize ? 0 : ERROR_LOGICAL);
+	return (len == (message->dataSize + headerSize) ? 0 : ERROR_LOGICAL);
 }
 
 int recv_message(int sourceSocket, Message *message) {
-	int bytesToRecv;
+	int bytesToRecv, headerSize;
 	int res;
 	unsigned char* header;
 	unsigned int len = 0;
 
 	/* Receiving header */
-	bytesToRecv = sizeof(int) + 1;
+	headerSize = bytesToRecv = sizeof(int) + 1;
 	header = calloc(bytesToRecv, 1);
 	if (header == NULL) {
 		return (ERROR);
@@ -124,7 +124,7 @@ int recv_message(int sourceSocket, Message *message) {
 		}
 	}
 
-	return (len == message->dataSize ? 0 : ERROR_LOGICAL);
+	return (len == (message->dataSize + headerSize) ? 0 : ERROR_LOGICAL);
 }
 
 int prepare_message_from_string(char* str, Message* message) {
@@ -161,20 +161,51 @@ int send_empty_message(int socket, MessageType type) {
 void free_mail_struct(Mail* mail) {
 
 	int i;
-	for (i = 0; i < mail->numAttachments; i++) {
-		free(mail->attachments[i].data);
-		free(mail->attachments[i].fileName);
+	for (i = 0; (i < mail->numAttachments) && (mail->attachments != NULL); i++) {
+		if (mail->attachments[i].data != NULL) {
+			free(mail->attachments[i].data);
+		}
+
+		if (mail->attachments[i].fileName != NULL) {
+			free(mail->attachments[i].fileName);
+		}
+
+		memset(mail->attachments + i, 0, sizeof(Attachment));
 	}
-	free(mail->attachments);
-	free(mail->body);
-	free(mail->sender);
-	free(mail->subject);
+
+	if (mail->attachments != NULL) {
+		free(mail->attachments);
+	}
+
+	for (i = 0; (i < mail->numRecipients) && (mail->recipients != NULL); i++) {
+		if (mail->recipients[i] != NULL) {
+			free(mail->recipients[i]);
+		}
+		mail->recipients[i] = NULL;
+	}
+
+	if (mail->recipients != NULL) {
+		free(mail->recipients);
+	}
+
+	if (mail->body != NULL) {
+		free(mail->body);
+	}
+
+	if (mail->sender != NULL) {
+		free(mail->sender);
+	}
+
+	if (mail->subject != NULL) {
+		free(mail->subject);
+	}
+
+	memset(mail, 0, sizeof(Mail));
 }
 
 void free_message(Message *message) {
 	if (message->data != NULL) {
 		free(message->data);
-		message->data = NULL;
-		message->dataSize = 0;
 	}
+	memset(message, 0, sizeof(Message));
 }
