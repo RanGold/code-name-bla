@@ -1,6 +1,7 @@
 #define MAX_ROW_LENGTH 256
 #define WELLCOME_MESSAGE "Welcome! I am simple-mail-server."
 #define SERVER_USAGE_MSG "Usage mail_server <users_file> [port]"
+#define DEAFULT_PORT 6423
 
 #include "common.h"
 
@@ -25,20 +26,31 @@ void create_stub(User *user){
 	file = fopen("/home/student/EclipseWorkspace/Networks1/users", "r");
 	fread(mail1.attachments[0].data, 27, 1, file);
 	fclose(file);
+	mail1.numRecipients = 2;
+	mail1.recipients = calloc(2, sizeof(char*));
+	mail1.recipients[0] = calloc(5, 1);
+	strcpy(mail1.recipients[0], "amir");
+	mail1.recipients[1] = calloc(6, 1);
+	strcpy(mail1.recipients[1], "tammy");
 
 	mail2.id = 2;
 	mail2.sender = calloc(5, 1);
 	strcpy(mail2.sender, "amir");
 	mail2.subject = calloc(6, 1);
 	strcpy(mail2.subject, "test2");
-	mail2.numAttachments = 3;
+	mail2.numAttachments = 0;
+	mail2.numRecipients = 0;
+	mail2.body = calloc(strlen("this is a test message"), 1);
+	strcpy(mail2.body, "Hey there, sup?");
 
 	mail_deleted.id = -1;
 
-	user->mails = calloc(3, sizeof(Mail));
-	user->mails[0] = mail1;
-	user->mails[1] = mail_deleted;
-	user->mails[2] = mail2;
+	user->mails = calloc(3, sizeof(Mail*));
+	user->mails[0] = calloc(sizeof(Mail), 1);
+	*(user->mails[0]) = mail1;
+	user->mails[1] = NULL;
+	user->mails[2] = calloc(sizeof(Mail), 1);
+	*(user->mails[2]) = mail2;
 	user->mailAmount = 3;
 
 }
@@ -112,7 +124,7 @@ void free_users_array(User *users, int usersAmount) {
 
 	for (i = 0; i < usersAmount; i++) {
 		for (j = 0; j < users[i].mailAmount; j++) {
-			free_mail_struct(users[i].mails + j);
+			free_mail_struct(users[i].mails[j]);
 		}
 		free(users[i].mails);
 	}
@@ -124,12 +136,16 @@ User* check_credentials_message(User* users, int usersAmount, Message *message) 
 
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
+	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 1];
+
 	int i;
 
 	if (message->messageType != Credentials) {
 		return (NULL);
 	}
 
+	memcpy(credentials, message->data, message->dataSize);
+	credentials[message->dataSize] = 0;
 	if (sscanf((char*)message->data, "%s\t%s", userName, password) != 2) {
 		return (NULL);
 	}
@@ -143,26 +159,64 @@ User* check_credentials_message(User* users, int usersAmount, Message *message) 
 	return (NULL);
 }
 
+int calculate_mail_header_size(Mail *mail) {
+	int size = 0;
+
+	size += strlen(mail->sender) + 1;
+	size += strlen(mail->subject) + 1;
+	size += sizeof(mail->numAttachments);
+
+	return (size);
+}
+
+int calculate_mail_size(Mail *mail) {
+	int i, size = 0;
+
+	size += calculate_mail_header_size(mail);
+
+	for (i = 0; i < mail->numAttachments; i++) {
+		size += strlen(mail->attachments[i].fileName) + 1;
+	}
+
+	size += sizeof(mail->numRecipients);
+	for (i = 0; i < mail->numRecipients; i++) {
+		size += strlen(mail->recipients[i]) + 1;
+	}
+
+	size += strlen(mail->body) + 1;
+
+	return (size);
+}
+
 int calculate_inbox_info_size(User *user){
 
 	int i, messageSize = 0;
 
 	for (i = 0; i < user->mailAmount; i++) {
-		if (user->mails[i].id != -1){
-			messageSize += sizeof(user->mails[i].id);
-			messageSize += strlen(user->mails[i].sender) + 1;
-			messageSize += strlen(user->mails[i].subject) + 1;
-			messageSize += sizeof(user->mails[i].numAttachments);
+		if (user->mails[i] != NULL){
+			messageSize += sizeof(user->mails[i]->id);
+			messageSize += calculate_mail_header_size(user->mails[i]);
 		}
 	}
 	return messageSize;
 }
 
-int prepare_message_from_inbox_content(User *user, Message* message) {
+void insert_mail_header_to_buffer(unsigned char *buffer, int *offset, Mail *mail) {
+	int senderLength = strlen(mail->sender) + 1;
+	int subjectLength = strlen(mail->subject) + 1;
+
+	memcpy(buffer + *offset, mail->sender, senderLength);
+	*offset += senderLength;
+	memcpy(buffer + *offset, mail->subject, subjectLength);
+	*offset += subjectLength;
+	memcpy(buffer + *offset, &(mail->numAttachments), sizeof(mail->numAttachments));
+	*offset += sizeof(mail->numAttachments);
+}
+
+int prepare_message_from_inbox_content(User *user, Message *message) {
 
 	int i;
-	int placeToCopy = 0;
-	short senderLength, subjectLength;
+	int offset = 0;
 
 	message->messageType = InboxContent;
 
@@ -175,19 +229,155 @@ int prepare_message_from_inbox_content(User *user, Message* message) {
 	}
 
 	for (i = 0; i < user->mailAmount; i++) {
-		if (user->mails[i].id != -1){
-			senderLength = strlen(user->mails[i].sender) + 1;
-			subjectLength = strlen(user->mails[i].subject) + 1;
+		if (user->mails[i] != NULL){
 
-			memcpy(message->data + placeToCopy, &(user->mails[i].id), sizeof(user->mails[i].id));
-			placeToCopy += sizeof(user->mails[i].id);
-			memcpy(message->data + placeToCopy, user->mails[i].sender, senderLength);
-			placeToCopy += senderLength;
-			memcpy(message->data + placeToCopy, user->mails[i].subject, subjectLength);
-			placeToCopy += subjectLength;
-			memcpy(message->data + placeToCopy, &(user->mails[i].numAttachments), sizeof(user->mails[i].numAttachments));
-			placeToCopy += sizeof(user->mails[i].numAttachments);
+			memcpy(message->data + offset, &(user->mails[i]->id), sizeof(user->mails[i]->id));
+			offset += sizeof(user->mails[i]->id);
+			insert_mail_header_to_buffer(message->data, &offset, user->mails[i]);
 		}
+	}
+
+	return (0);
+}
+
+void get_mail_id_from_message(Message *message, unsigned short *mailID) {
+
+	if (message->messageType != GetMail || message->dataSize != sizeof(short)) {
+		*mailID = ERROR_LOGICAL;
+	} else {
+		memcpy(mailID, message->data, message->dataSize);
+		free_message(message);
+	}
+}
+
+Mail* get_mail_by_id (User *user, unsigned short mailID) {
+
+	int i;
+
+	for (i = 0; i < user->mailAmount; i++) {
+		if ((user->mails[i] != NULL) && (user->mails[i]->id == mailID)) {
+			return (user->mails[i]);
+		}
+	}
+
+	return (NULL);
+}
+
+int prepare_message_from_mail(User *user, Message *message, unsigned short mailID) {
+
+	Mail *mail = get_mail_by_id(user, mailID);
+	int offset = 0, i;
+	int recipientNameLen, attachemntNameLen, bodyLen;
+
+	if (mail == NULL) {
+		return (ERROR_INVALID_ID);
+	}
+
+	message->messageType = MailContent;
+	message->dataSize = calculate_mail_size(mail);
+	message->data = calloc(message->dataSize, 1);
+	if (message->data == NULL) {
+		return (ERROR);
+	}
+
+	insert_mail_header_to_buffer(message->data, &offset, mail);
+
+	/* Inserting attachments names */
+	for (i = 0; i < mail->numAttachments; i++) {
+		attachemntNameLen = strlen(mail->attachments[i].fileName) + 1;
+		memcpy(message->data + offset, mail->attachments[i].fileName, attachemntNameLen);
+		offset += attachemntNameLen;
+	}
+
+	/* Inserting recipients */
+	memcpy(message->data + offset, &(mail->numRecipients), sizeof(mail->numRecipients));
+	offset += sizeof(mail->numRecipients);
+	for (i = 0; i < mail->numRecipients; i++) {
+		recipientNameLen = strlen(mail->recipients[i]) + 1;
+		memcpy(message->data + offset, mail->recipients[i], recipientNameLen);
+		offset += recipientNameLen;
+	}
+
+	/* Inserting body */
+	bodyLen = strlen(mail->body) + 1;
+	memcpy(message->data + offset, mail->body, bodyLen);
+	offset += bodyLen;
+
+	return (0);
+}
+
+void get_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachemntID) {
+
+	if ((message->messageType != GetAttachment) ||
+			(message->dataSize != (sizeof(short) + 1))) {
+		*mailID = ERROR_LOGICAL;
+	} else {
+		memcpy(mailID, message->data, sizeof(short));
+		memcpy(attachemntID, message->data + sizeof(short), 1);
+		free_message(message);
+	}
+}
+
+Attachment* get_attachment_by_id (User *user, short mailID, unsigned char attachmentID) {
+
+	Mail* mail = get_mail_by_id(user, mailID);
+
+	if ((mail != NULL) && (mail->numAttachments >= attachmentID)) {
+		return (mail->attachments + attachmentID - 1);
+	}
+
+	return (NULL);
+}
+
+int prepare_message_from_attachment(User *user, Message *message, unsigned short mailID, unsigned char attachmentID) {
+	Attachment *attachment;
+
+	attachment = get_attachment_by_id(user, mailID, attachmentID);
+	if (attachment == NULL) {
+		return (ERROR_INVALID_ID);
+	}
+
+	message->messageType = AttachmentContent;
+	message->dataSize = attachment->size + strlen(attachment->fileName) + 1;
+	message->data = calloc(message->dataSize, 1);
+	if (message->data == NULL){
+		return (ERROR);
+	}
+	memcpy(message->data, attachment->fileName, strlen(attachment->fileName) + 1);
+	memcpy(message->data + strlen(attachment->fileName) + 1, attachment->data, attachment->size);
+
+	return (0);
+}
+
+int initiallize_listen_socket(int *listenSocket, short port) {
+
+	struct sockaddr_in serverAddr;
+	int res;
+
+	/* Create listen socket - needs to be same as the client */
+	*listenSocket = socket(PF_INET, SOCK_STREAM, 0);
+	if (*listenSocket == -1) {
+		return (ERROR);
+	}
+
+	/* Prepare address structure to bind listen socket */
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	serverAddr.sin_port = htons(port);
+
+	/* Bind listen socket - no other processes can bind to this port */
+	res = bind(*listenSocket, (struct sockaddr*) &serverAddr,
+					sizeof(serverAddr));
+	if (res == -1) {
+		close(*listenSocket);
+		return (ERROR);
+	}
+
+	/* Start listening */
+	res = listen(*listenSocket, 1);
+	if (res == -1) {
+		close(*listenSocket);
+		return (ERROR);
 	}
 
 	return (0);
@@ -197,13 +387,15 @@ int prepare_message_from_inbox_content(User *user, Message* message) {
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
-	short port = 6423;
+	short port = DEAFULT_PORT;
 	int usersAmount, res;
 	unsigned int len;
 	User *users = NULL, *curUser = NULL;
 	int listenSocket, clientSocket;
-	struct sockaddr_in serverAddr, clientAddr;
+	struct sockaddr_in clientAddr;
 	Message message;
+	unsigned short mailID;
+	unsigned char attachemntID;
 
 	/* Validate number of arguments */
 	if (argc != 2 && argc != 3) {
@@ -218,40 +410,13 @@ int main(int argc, char** argv) {
 		print_error_message("Failed initiallizing users array");
 	}
 
-	/* Create listen socket - needs to be same as the client */
-	listenSocket = socket(PF_INET, SOCK_STREAM, 0);
-	if (listenSocket == -1) {
+	if (initiallize_listen_socket(&listenSocket, port) == ERROR) {
 		print_error();
 		free_users_array(users, usersAmount);
 		return (ERROR);
 	}
 
-	/* Prepare address structure to bind listen socket */
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	serverAddr.sin_port = htons(port);
-
-	/* Bind listen socket - no other processes can bind to this port */
-	res = bind(listenSocket, (struct sockaddr*) &serverAddr,
-					sizeof(serverAddr));
-	if (res == -1) {
-		print_error();
-		close(listenSocket);
-		free_users_array(users, usersAmount);
-		return (ERROR);
-	}
-
-	/* Start listening */
-	res = listen(listenSocket, 1);
-	if (res == -1) {
-		print_error();
-		close(listenSocket);
-		free_users_array(users, usersAmount);
-		return (ERROR);
-	}
-
-	message.data = NULL;
-	message.dataSize = 0;
+	memset(&message, 0, sizeof(message));;
 
 	do {
 
@@ -276,8 +441,7 @@ int main(int argc, char** argv) {
 					if (res != 0) {
 						if (res == ERROR) {
 							print_error();
-						}
-						if (res == ERROR_LOGICAL) {
+						} else if (res == ERROR_LOGICAL) {
 							print_error_message(INVALID_DATA_MESSAGE);
 						}
 						break;
@@ -311,6 +475,38 @@ int main(int argc, char** argv) {
 								(send_message(clientSocket, &message) != 0)) {
 							print_error();
 						}
+					} else if (message.messageType == GetMail) {
+
+						get_mail_id_from_message(&message, &mailID);
+						if (mailID == ERROR_LOGICAL) {
+							print_error_message(INVALID_DATA_MESSAGE);
+							break;
+						}
+
+						res = prepare_message_from_mail(curUser, &message, mailID);
+						if (res == ERROR_INVALID_ID) {
+							send_empty_message(clientSocket, InvalidID);
+						} else if ((res != 0) || (send_message(clientSocket, &message) != 0)) {
+							print_error();
+						}
+					} else if (message.messageType == GetAttachment) {
+
+						get_mail_attachment_id_from_message(&message, &mailID, &attachemntID);
+						if (mailID == ERROR_LOGICAL) {
+							print_error_message(INVALID_DATA_MESSAGE);
+							break;
+						}
+
+						res = prepare_message_from_attachment(curUser, &message,
+								mailID, attachemntID);
+						if (res == ERROR_INVALID_ID) {
+							send_empty_message(clientSocket, InvalidID);
+						} else if ((res != 0) || (send_message(clientSocket,
+								&message) != 0)) {
+							print_error();
+						}
+					} else {
+						/* TODO: send error command message */
 					}
 
 					free_message(&message);

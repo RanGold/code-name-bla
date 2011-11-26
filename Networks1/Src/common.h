@@ -6,6 +6,7 @@
 #define ERROR -1
 #define ERROR_SOCKET_CLOSED -2
 #define ERROR_LOGICAL -3
+#define ERROR_INVALID_ID -4
 #define INVALID_DATA_MESSAGE "Invalid data received"
 
 #include <stdio.h>
@@ -41,19 +42,22 @@ typedef struct Attachment {
 } Attachment;
 
 typedef struct Mail {
-	short id;
+	unsigned short id;
 	char* sender;
 	char* subject;
+	unsigned char numRecipients;
+	char** recipients;
 	char* body;
 	unsigned char numAttachments;
 	Attachment* attachments;
+	unsigned char numRefrences;
 } Mail;
 
 typedef struct User {
 	char name[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
 	int mailAmount;
-	Mail* mails;
+	Mail** mails;
 } User;
 
 typedef struct Message {
