@@ -7,7 +7,7 @@
 
 /* TODO: delete this */
 void create_stub(User *user){
-	Mail mail1, mail2, mail_deleted;
+	Mail mail1, mail2;
 	FILE* file;
 
 	mail1.id = 1;
@@ -32,6 +32,7 @@ void create_stub(User *user){
 	strcpy(mail1.recipients[0], "amir");
 	mail1.recipients[1] = calloc(6, 1);
 	strcpy(mail1.recipients[1], "tammy");
+	mail1.numRefrences = 1;
 
 	mail2.id = 2;
 	mail2.sender = calloc(5, 1);
@@ -42,8 +43,7 @@ void create_stub(User *user){
 	mail2.numRecipients = 0;
 	mail2.body = calloc(strlen("this is a test message"), 1);
 	strcpy(mail2.body, "Hey there, sup?");
-
-	mail_deleted.id = -1;
+	mail2.numRefrences = 1;
 
 	user->mails = calloc(3, sizeof(Mail*));
 	user->mails[0] = calloc(sizeof(Mail), 1);
@@ -240,9 +240,9 @@ int prepare_message_from_inbox_content(User *user, Message *message) {
 	return (0);
 }
 
-void get_mail_id_from_message(Message *message, unsigned short *mailID) {
+void get_mail_id_from_message(Message *message, unsigned short *mailID, MessageType messageType) {
 
-	if (message->messageType != GetMail || message->dataSize != sizeof(short)) {
+	if (message->messageType != messageType || message->dataSize != sizeof(short)) {
 		*mailID = ERROR_LOGICAL;
 	} else {
 		memcpy(mailID, message->data, message->dataSize);
@@ -250,12 +250,13 @@ void get_mail_id_from_message(Message *message, unsigned short *mailID) {
 	}
 }
 
-Mail* get_mail_by_id (User *user, unsigned short mailID) {
+Mail* get_mail_by_id (User *user, unsigned short mailID, int *mailIndex) {
 
 	int i;
 
 	for (i = 0; i < user->mailAmount; i++) {
 		if ((user->mails[i] != NULL) && (user->mails[i]->id == mailID)) {
+			*mailIndex = i;
 			return (user->mails[i]);
 		}
 	}
@@ -265,7 +266,8 @@ Mail* get_mail_by_id (User *user, unsigned short mailID) {
 
 int prepare_message_from_mail(User *user, Message *message, unsigned short mailID) {
 
-	Mail *mail = get_mail_by_id(user, mailID);
+	int mailIndex;
+	Mail* mail = get_mail_by_id(user, mailID, &mailIndex);
 	int offset = 0, i;
 	int recipientNameLen, attachemntNameLen, bodyLen;
 
@@ -319,8 +321,8 @@ void get_mail_attachment_id_from_message(Message *message, unsigned short *mailI
 }
 
 Attachment* get_attachment_by_id (User *user, short mailID, unsigned char attachmentID) {
-
-	Mail* mail = get_mail_by_id(user, mailID);
+	int mailIndex;
+	Mail* mail = get_mail_by_id(user, mailID, &mailIndex);
 
 	if ((mail != NULL) && (mail->numAttachments >= attachmentID)) {
 		return (mail->attachments + attachmentID - 1);
@@ -345,6 +347,25 @@ int prepare_message_from_attachment(User *user, Message *message, unsigned short
 	}
 	memcpy(message->data, attachment->fileName, strlen(attachment->fileName) + 1);
 	memcpy(message->data + strlen(attachment->fileName) + 1, attachment->data, attachment->size);
+
+	return (0);
+}
+
+int delete_mail(User *user, unsigned short mailID) {
+	int mailIndex;
+	Mail *mail = get_mail_by_id(user, mailID, &mailIndex);
+
+	if (mail == NULL) {
+		return (ERROR_INVALID_ID);
+	}
+
+	/* Removing reference */
+	user->mails[mailIndex] = NULL;
+	mail->numRefrences--;
+
+	if (mail->numRefrences == 0) {
+		free_mail_struct(mail);
+	}
 
 	return (0);
 }
@@ -477,7 +498,7 @@ int main(int argc, char** argv) {
 						}
 					} else if (message.messageType == GetMail) {
 
-						get_mail_id_from_message(&message, &mailID);
+						get_mail_id_from_message(&message, &mailID, GetMail);
 						if (mailID == ERROR_LOGICAL) {
 							print_error_message(INVALID_DATA_MESSAGE);
 							break;
@@ -503,6 +524,20 @@ int main(int argc, char** argv) {
 							send_empty_message(clientSocket, InvalidID);
 						} else if ((res != 0) || (send_message(clientSocket,
 								&message) != 0)) {
+							print_error();
+						}
+					} else if (message.messageType == DeleteMail) {
+						get_mail_id_from_message(&message, &mailID, DeleteMail);
+						if (mailID == ERROR_LOGICAL) {
+							print_error_message(INVALID_DATA_MESSAGE);
+							break;
+						}
+
+						res = delete_mail(curUser, mailID);
+						if (res == ERROR_INVALID_ID) {
+							send_empty_message(clientSocket, InvalidID);
+						} else if ((res != 0) || (send_empty_message(clientSocket,
+								DeleteApprove) != 0)) {
 							print_error();
 						}
 					} else {
