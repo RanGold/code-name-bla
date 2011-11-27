@@ -1,7 +1,7 @@
 /* system parameters */
 #define MAX_HOST_NAME_LEN 256
-#define MAX_INPUT_LEN 256
-#define MAX_PATH_LEN 200
+#define MAX_INPUT_LEN 1024
+#define MAX_PATH_LEN 256
 #define MAX_PORT_LEN 7
 #define DEFAULT_HOST_NAME "localhost"
 #define DEFAULT_PORT "6423"
@@ -10,12 +10,15 @@
 #define CLIENT_USAGE_MESSAGE "Usage mail_client [hostname [port]]"
 #define CREDENTIALS_USAGE_MESSAGE "Expected:\nUser: [username]\nPassword: [password]"
 #define WRONG_CREDENTIALS_MESSAGE "Wrong credentials"
+#define COMPOSE_USAGE_MESSAGE "Expected:\nTo: [username,...]\nSubject: [subject]\nAttachments: [path,..]\nText: [text]"
 
 /* commands definitions */
 #define QUIT_MESSAGE "QUIT\n"
 #define SHOW_INBOX "SHOW_INBOX\n"
 #define GET_MAIL "GET_MAIL "
 #define GET_ATTACHMENT "GET_ATTACHMENT "
+#define DELETE_MAIL "DELETE_MAIL "
+#define COMPOSE "COMPOSE\n"
 
 /* general definitions */
 #define CONNECTION_SUCCEED "Connected to server"
@@ -232,10 +235,8 @@ int print_inbox_info_from_message(Message *message) {
 	return (0);
 }
 
-int send_get_mail_message(int clientSocket, unsigned short mailID,
-		Message* message) {
-
-	message->messageType = GetMail;
+int send_mail_id_message(int clientSocket, unsigned short mailID, Message* message, MessageType messageType) {
+	message->messageType = messageType;
 	message->dataSize = sizeof(mailID);
 
 	message->data = calloc(message->dataSize, 1);
@@ -245,6 +246,18 @@ int send_get_mail_message(int clientSocket, unsigned short mailID,
 	memcpy(message->data, &mailID, message->dataSize);
 
 	return (send_message(clientSocket, message));
+}
+
+int send_get_mail_message(int clientSocket, unsigned short mailID,
+		Message* message) {
+
+	return (send_mail_id_message(clientSocket, mailID, message, GetMail));
+}
+
+int send_delete_mail_message(int clientSocket, unsigned short mailID,
+		Message* message) {
+
+	return (send_mail_id_message(clientSocket, mailID, message, DeleteMail));
 }
 
 int send_get_attachment_message(int clientSocket, unsigned short mailID,
@@ -323,6 +336,8 @@ int main(int argc, char** argv) {
 	int isLoggedIn = 0;
 	unsigned short mailID, tempAttachmentID;
 	unsigned char attachmentID;
+	char tempRecipients[MAX_INPUT_LEN + 1], tempSubject[MAX_INPUT_LEN + 1],
+			tempAttachments[MAX_INPUT_LEN + 1], tempText[MAX_INPUT_LEN + 1];
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
@@ -484,6 +499,40 @@ int main(int argc, char** argv) {
 			} else if (save_attachment_from_message(&message, attachmentPath) != 0) {
 				print_error();
 				break;
+			} else {
+				printf ("‫‪Attachment saved‬‬\n");
+			}
+		} else if (sscanf(input, DELETE_MAIL "%hu", &mailID) == 1) {
+			res = send_delete_mail_message(clientSocket, mailID, &message);
+			if (res == ERROR) {
+				print_error();
+				break;
+			} else if (res == ERROR_LOGICAL) {
+				print_error_message(INVALID_DATA_MESSAGE);
+				break;
+			}
+			free_message(&message);
+
+			res = recv_message(clientSocket, &message);
+			if (res != 0) {
+				print_error();
+				break;
+			} else {
+				if (message.messageType == InvalidID) {
+					print_error_message("Invalid id requested");
+				} else if (message.messageType != DeleteApprove) {
+					print_error_message("Invalid data received");
+					break;
+				}
+			}
+		} else if (strcmp(input, COMPOSE) == 0) {
+			if ((scanf("To: %s", tempRecipients) != 1) ||
+					(scanf("Subject: %s", tempSubject) != 1) ||
+					(scanf("Attachments: %s", tempAttachments) != 1) ||
+					(scanf("Text: %s", tempText) != 1)) {
+				print_error_message(COMPOSE_USAGE_MESSAGE);
+			} else {
+
 			}
 		} else {
 			print_error_message("Invalid command");

@@ -32,7 +32,9 @@ typedef enum MessageType {
 	MailContent,
 	GetAttachment,
 	AttachmentContent,
-	InvalidID
+	InvalidID,
+	DeleteMail,
+	DeleteApprove
 } MessageType;
 
 typedef struct Attachment {
