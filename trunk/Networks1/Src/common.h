@@ -19,24 +19,6 @@
 #include <netdb.h>
 #include <errno.h>
 
-typedef enum MessageType {
-	String,
-	Quit,
-	Credentials,
-	CredentialsAccept,
-	CredentialsDeny,
-	ShowInbox,
-	InboxContent,
-	Compose,
-	GetMail,
-	MailContent,
-	GetAttachment,
-	AttachmentContent,
-	InvalidID,
-	DeleteMail,
-	DeleteApprove
-} MessageType;
-
 typedef struct Attachment {
 	char* fileName;
 	int size;
@@ -55,16 +37,35 @@ typedef struct Mail {
 	unsigned char numRefrences;
 } Mail;
 
-typedef struct User {
-	char name[MAX_NAME_LEN + 1];
-	char password[MAX_PASSWORD_LEN + 1];
-	int mailAmount;
-	Mail** mails;
-} User;
+typedef enum MessageType {
+	String,
+	Quit,
+	Credentials,
+	CredentialsAccept,
+	CredentialsDeny,
+	ShowInbox,
+	InboxContent,
+	Compose,
+	GetMail,
+	MailContent,
+	GetAttachment,
+	AttachmentContent,
+	InvalidID,
+	DeleteMail,
+	DeleteApprove
+} MessageType;
+
+typedef enum MessageSize {
+	ZeroSize,
+	TwoBytes,
+	ThreeBytes,
+	VariedSize
+} MessageSize;
 
 typedef struct Message {
 	MessageType messageType;
-	int dataSize;
+	MessageSize messageSize;
+	int size;
 	unsigned char* data;
 } Message;
 
@@ -72,16 +73,43 @@ void print_error();
 
 void print_error_message(char *message);
 
-int send_message(int targetSocket, Message *message);
+void free_message(Message *message);
 
 int recv_message(int sourceSocket, Message *message);
 
-int prepare_message_from_string (char *str, Message *message);
+int send_message_from_string (int socket, char *str);
 
-int prepare_string_from_message (char **str, Message *message);
+int recv_string_from_message (int socket, char **str);
+
+int send_message_from_credentials(int socket, char* userName, char* password);
+
+int get_credentials_from_message(Message* message, char* userName, char* password);
 
 int send_empty_message(int socket, MessageType type);
 
-void free_mail_struct(Mail* mail);
+void free_mail(Mail* mail);
 
-void free_message(Message *message);
+void free_mails(int mailAmount, Mail *mails);
+
+int send_message_from_inbox_content(int socket, Mail **mails, int mailAmount);
+
+int recv_inbox_content_from_message(int socket, Mail **mails, int *mailAmount);
+
+int send_get_mail_message(int clientSocket, unsigned short mailID);
+
+void get_mail_id_from_message(Message *message, unsigned short *mailID, MessageType messageType);
+
+int send_message_from_mail(int socket, Mail *mail);
+
+int recv_mail_from_message(int socket, Mail *mail);
+
+int send_get_attachment_message(int socket, unsigned short mailID,
+		unsigned char attachmentID);
+
+void get_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachemntID);
+
+int send_message_from_attachment(int socket, Attachment *attachment);
+
+int recv_attachment_from_message(int socket, Attachment *attachment);
+
+FILE* get_valid_file(char* fileName);
