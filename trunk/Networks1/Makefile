@@ -14,10 +14,10 @@ all: $(allExe)
 clean:
 	-rm ./Bin/*.o $(allExe)
 
-mail_client: mail_client.o common.o
+mail_client: common.o mail_client.o
 	gcc $(exeFLAGS)mail_client ./Bin/mail_client.o ./Bin/common.o
 
-mail_server: mail_server.o common.o
+mail_server: common.o mail_server.o
 	gcc $(exeFLAGS)mail_server ./Bin/mail_server.o ./Bin/common.o
 
 mail_client.o:
