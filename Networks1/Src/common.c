@@ -114,6 +114,8 @@ int recv_message(int sourceSocket, Message *message) {
 	unsigned char header;
 	unsigned int len = 0;
 
+	memset(message, 0, sizeof(Message));
+
 	/* Receiving header */
 	bytesToRecv = 1;
 	res = recv_all(sourceSocket, &header, &bytesToRecv);
@@ -168,6 +170,9 @@ int check_typed_message(int socket, Message *message,
 	if (res != 0) {
 		free_message(message);
 		return (res);
+	} else if (message->messageType == InvalidID) {
+			free_message(message);
+			return (ERROR_INVALID_ID);
 	} else if (message->messageType != messageType) {
 		free_message(message);
 		return (ERROR_LOGICAL);
@@ -274,7 +279,7 @@ int send_message_from_credentials(int socket, char* userName, char* password) {
 	return (0);
 }
 
-int get_credentials_from_message(Message* message, char* userName, char* password) {
+int prepare_credentials_from_message(Message* message, char* userName, char* password) {
 
 	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 1];
 
@@ -294,6 +299,25 @@ int get_credentials_from_message(Message* message, char* userName, char* passwor
 	return (0);
 }
 
+int recv_credentials_result(int socket) {
+
+	int res;
+	Message message;
+
+	res = recv_message(socket, &message);
+	if (res != 0) {
+	} else if (message.messageType == CredentialsAccept) {
+		res = 1;
+	} else if (message.messageType == CredentialsDeny) {
+		res = 0;
+	} else {
+		res = ERROR;
+	}
+
+	free_message(&message);
+	return(res);
+}
+
 int send_empty_message(int socket, MessageType type) {
 
 	Message message;
@@ -305,19 +329,23 @@ int send_empty_message(int socket, MessageType type) {
 	return (send_message(socket, &message));
 }
 
+void free_attachment(Attachment *attachment) {
+	if (attachment->data != NULL) {
+		free(attachment->data);
+	}
+
+	if (attachment->fileName != NULL) {
+		free(attachment->fileName);
+	}
+
+	memset(attachment, 0, sizeof(Attachment));
+}
+
 void free_mail(Mail* mail) {
 
 	int i;
 	for (i = 0; (i < mail->numAttachments) && (mail->attachments != NULL); i++) {
-		if (mail->attachments[i].data != NULL) {
-			free(mail->attachments[i].data);
-		}
-
-		if (mail->attachments[i].fileName != NULL) {
-			free(mail->attachments[i].fileName);
-		}
-
-		memset(mail->attachments + i, 0, sizeof(Attachment));
+		free_attachment(mail->attachments + i);
 	}
 
 	if (mail->attachments != NULL) {
@@ -552,12 +580,12 @@ int send_mail_id_message(int clientSocket, unsigned short mailID, Message* messa
 	return (send_message(clientSocket, message));
 }
 
-int send_get_mail_message(int clientSocket, unsigned short mailID) {
+int send_get_mail_message(int socket, unsigned short mailID) {
 
 	int res;
 	Message message;
 
-	res = send_mail_id_message(clientSocket, mailID, &message, GetMail);
+	res = send_mail_id_message(socket, mailID, &message, GetMail);
 	free_message(&message);
 	return (res);
 }
@@ -772,6 +800,27 @@ int send_message_from_attachment(int socket, Attachment *attachment) {
 
 int prepare_attachment_from_message(Message *message, Attachment *attachment) {
 
+	int fileNameLength;
+
+	/* Getting the attachment's name from the message */
+	fileNameLength = strlen((char*) message->data) + 1;
+	attachment->fileName = (char*) calloc(fileNameLength, 1);
+	if (attachment->fileName == NULL) {
+		return (ERROR);
+	}
+	memcpy(attachment->fileName, message->data, fileNameLength);
+
+	/* Getting the attachment's data from the message */
+	attachment->size = message->size - fileNameLength;
+	attachment->data = (unsigned char*) calloc(attachment->size, 1);
+	if (attachment->data == NULL) {
+		free(attachment->fileName);
+		attachment->fileName = NULL;
+		return (ERROR);
+	}
+	memcpy(attachment->data, message->data + fileNameLength, 1);
+
+	return (0);
 }
 
 int recv_attachment_from_message(int socket, Attachment *attachment) {
@@ -787,6 +836,39 @@ int recv_attachment_from_message(int socket, Attachment *attachment) {
 	res = prepare_attachment_from_message(&message, attachment);
 	free_message(&message);
 	return (res);
+}
+
+int send_delete_mail_message(int socket, unsigned short mailID) {
+
+	int res;
+	Message message;
+
+	res = send_mail_id_message(socket, mailID, &message, DeleteMail);
+	free_message(&message);
+	return (res);
+}
+
+int recv_delete_result(int socket) {
+
+	int res;
+	Message message;
+
+	res = recv_message(socket, &message);
+	if (res != 0) {
+		free_message(&message);
+		return res;
+	} else {
+		if (message.messageType == InvalidID) {
+			free_message(&message);
+			return (ERROR_INVALID_ID);
+		} else if (message.messageType != DeleteApprove) {
+			free_message(&message);
+			return (ERROR_LOGICAL);
+		} else {
+			free_message(&message);
+			return (0);
+		}
+	}
 }
 
 /* Gets a file for reading */

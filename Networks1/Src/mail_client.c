@@ -26,62 +26,24 @@
 
 #include "common.h"
 
-/* return ERROR on error
- *         1 on accept
- *		   0 on reject */
-int recv_credentials_result(int sourceSocket) {
-
-	int res;
-	Message *message;
-
-	res = recv_message(sourceSocket, message);
-	if (res != 0) {
-	} else if (message->messageType == CredentialsAccept) {
-		res = 1;
-	} else if (message->messageType == CredentialsDeny) {
-		res = 0;
-	} else {
-		res = ERROR;
-	}
-
-	free_message(message);
-	return(res);
-}
-
 int send_show_inbox(int sourceSocket) {
 	return send_empty_message(sourceSocket, ShowInbox);
 }
 
-int send_delete_mail_message(int clientSocket, unsigned short mailID,
-		Message* message) {
-
-	return (send_mail_id_message(clientSocket, mailID, message, DeleteMail));
-}
-
-int save_attachment_from_message(Message *message, char *savePath) {
+int save_file_from_attachment(Attachment *attachment, char *savePath) {
 	FILE *file;
-	char *fileName, *path;
-	int fileNameLength, pathLength;
+	char *path;
+	int pathLength;
 	size_t writenBytes;
 
-	/* Getting the attachment's name from the message */
-	fileNameLength = strlen((char*)message->data) + 1;
-	fileName = (char*)calloc(fileNameLength, 1);
-	if (fileName == NULL) {
-		return (ERROR);
-	}
-	memcpy(fileName, message->data, fileNameLength);
-
 	/* Preparing full path */
-	pathLength = strlen(fileName) + strlen(savePath) + 1;
+	pathLength = strlen(attachment->fileName) + strlen(savePath) + 1;
 	path = (char*)calloc(pathLength, 1);
 	if (path == NULL) {
-		free(fileName);
 		return (ERROR);
 	}
 	strcat(path, savePath);
-	strcat(path, fileName);
-	free(fileName);
+	strcat(path, attachment->fileName);
 
 	file = fopen(path, "w");
 	if (file == NULL) {
@@ -89,8 +51,8 @@ int save_attachment_from_message(Message *message, char *savePath) {
 		return(ERROR);
 	}
 
-	writenBytes = fwrite(message->data + fileNameLength, 1, message->size - fileNameLength, file);
-	if (writenBytes != message->size - fileNameLength) {
+	writenBytes = fwrite(attachment->data, 1, attachment->size, file);
+	if (writenBytes != attachment->size) {
 		fclose(file);
 		free(path);
 		return(ERROR);
@@ -296,12 +258,12 @@ int main(int argc, char** argv) {
 			res = recv_mail_from_message(clientSocket, &mail);
 			if (res != 0) {
 				free_mail(&mail);
-				if (message.messageType == InvalidID) {
+				if (res == ERROR_INVALID_ID) {
 					print_error_message(INVALID_ID_MESSAGE);
 				} else {
 					print_error();
-					break;
 				}
+				break;
 			}
 
 			print_mail(&mail);
@@ -319,23 +281,28 @@ int main(int argc, char** argv) {
 				break;
 			}
 
-			/* TODO: continue refactoring here */
 			res = recv_attachment_from_message(clientSocket, &attachment);
 			if (res != 0) {
-				if (message.messageType == InvalidID) {
+				free_attachment(&attachment);
+				if (res == ERROR_INVALID_ID) {
 					print_error_message(INVALID_ID_MESSAGE);
 				} else {
 					print_error();
-					break;
 				}
-			} else if (save_attachment_from_message(&message, attachmentPath) != 0) {
+				break;
+			}
+
+			if (save_file_from_attachment(&attachment, attachmentPath) != 0) {
+				free_attachment(&attachment);
 				print_error();
 				break;
 			} else {
 				printf ("‫‪Attachment saved‬‬\n");
 			}
+
+			free_attachment(&attachment);
 		} else if (sscanf(input, DELETE_MAIL "%hu", &mailID) == 1) {
-			res = send_delete_mail_message(clientSocket, mailID, &message);
+			res = send_delete_mail_message(clientSocket, mailID);
 			if (res == ERROR) {
 				print_error();
 				break;
@@ -345,17 +312,15 @@ int main(int argc, char** argv) {
 			}
 			free_message(&message);
 
-			res = recv_message(clientSocket, &message);
-			if (res != 0) {
+			res = recv_delete_result(clientSocket);
+			if (res == ERROR_INVALID_ID) {
+				print_error_message(INVALID_ID_MESSAGE);
+			} else if (res == ERROR_LOGICAL) {
+				print_error_message(INVALID_DATA_MESSAGE);
+				break;
+			} else if (res == ERROR) {
 				print_error();
 				break;
-			} else {
-				if (message.messageType == InvalidID) {
-					print_error_message(INVALID_ID_MESSAGE);
-				} else if (message.messageType != DeleteApprove) {
-					print_error_message("Invalid data received");
-					break;
-				}
 			}
 		} else if (strcmp(input, COMPOSE) == 0) {
 			if ((scanf("To: %s", tempRecipients) != 1) ||

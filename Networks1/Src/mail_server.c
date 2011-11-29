@@ -132,7 +132,7 @@ User* check_credentials_message(User* users, int usersAmount, Message *message) 
 	char password[MAX_PASSWORD_LEN + 1];
 	int i;
 
-	if (get_credentials_from_message(message, userName, password) != 0) {
+	if (prepare_credentials_from_message(message, userName, password) != 0) {
 		return (NULL);
 	}
 
