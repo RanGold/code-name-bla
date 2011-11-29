@@ -21,7 +21,8 @@ int send_all(int targetSocket, unsigned char *buf, int *len) {
 	int n;
 
 	while (total < *len) {
-		n = send(targetSocket, buf + total, bytesleft, 0);
+		/* No signal raised on error closed socket, instead it is recognized by return value */
+		n = send(targetSocket, buf + total, bytesleft, MSG_NOSIGNAL);
 		if (n == -1) {
 			break;
 		}
@@ -31,7 +32,7 @@ int send_all(int targetSocket, unsigned char *buf, int *len) {
 
 	*len = total; /* Return number actually sent here */
 
-	return n == -1 ? ERROR : 0; /* return ERROR on failure, 0 on success */
+	return (n == -1 ? ERROR : 0); /* return ERROR on failure, 0 on success */
 }
 
 int recv_all(int sourceSocket, unsigned char *buf, int *len) {
@@ -103,8 +104,10 @@ int send_message(int targetSocket, Message *message) {
 		}
 	}
 
+
+	res = (len == (message->size + 1) ? 0 : ERROR_LOGICAL);
 	free_message(message);
-	return (len == (message->size + 1) ? 0 : ERROR_LOGICAL);
+	return(res);
 }
 
 int recv_message(int sourceSocket, Message *message) {
@@ -133,16 +136,16 @@ int recv_message(int sourceSocket, Message *message) {
 	if (message->messageSize == ZeroSize) {
 		bytesToRecv = message->size = 0;
 	} else if (message->messageSize == TwoBytes) {
-		bytesToRecv = message->size = sizeof(unsigned short);
+		bytesToRecv = message->size = 2;
 	} else if (message->messageSize == ThreeBytes) {
-		bytesToRecv = message->size = 1 + sizeof(unsigned short);
-	} else if (message->size == VariedSize) {
+		bytesToRecv = message->size = 3;
+	} else if (message->messageSize == VariedSize) {
 		bytesToRecv = sizeof(int);
-		res = recv_all(sourceSocket, (unsigned char*)&(bytesToRecv), &bytesToRecv);
+		res = recv_all(sourceSocket, (unsigned char*)&(message->size), &bytesToRecv);
 		if (res != 0) {
 			return (res);
 		}
-		message->size = bytesToRecv;
+		bytesToRecv = message->size;
 	} else {
 		return (ERROR_LOGICAL);
 	}
@@ -153,7 +156,7 @@ int recv_message(int sourceSocket, Message *message) {
 		res = recv_all(sourceSocket, message->data, &bytesToRecv);
 		if (res != 0) {
 			free(message->data);
-			return res;
+			return (res);
 		} else {
 			len += bytesToRecv;
 		}
@@ -188,11 +191,12 @@ int prepare_message_from_string(char* str, Message* message) {
 	message->size = strlen(str);
 
 	message->data = calloc(message->size, 1);
-	if (message->data != NULL) {
-		memcpy(message->data, str, message->size);
+	if (message->data == NULL) {
+		return (ERROR);
 	}
 
-	return (message->data == NULL ? ERROR : 0);
+	memcpy(message->data, str, message->size);
+	return (0);
 }
 
 int prepare_string_from_message(char** str, Message* message) {
@@ -299,29 +303,29 @@ int prepare_credentials_from_message(Message* message, char* userName, char* pas
 	return (0);
 }
 
-int recv_credentials_result(int socket) {
+int recv_credentials_result(int socket, int *isLoggedIn) {
 
 	int res;
 	Message message;
 
 	res = recv_message(socket, &message);
-	if (res != 0) {
-	} else if (message.messageType == CredentialsAccept) {
-		res = 1;
-	} else if (message.messageType == CredentialsDeny) {
-		res = 0;
-	} else {
-		res = ERROR;
+	if (res == 0) {
+		if (message.messageType == CredentialsAccept) {
+			*isLoggedIn = 1;
+		} else if (message.messageType == CredentialsDeny) {
+			*isLoggedIn = 0;
+		}
 	}
 
 	free_message(&message);
-	return(res);
+	return (res);
 }
 
 int send_empty_message(int socket, MessageType type) {
 
 	Message message;
 
+	memset(&message, 0, sizeof(Message));
 	message.messageType = type;
 	message.messageSize = ZeroSize;
 	message.size = 0;
@@ -406,7 +410,7 @@ int calculate_inbox_info_size(Mail **mails, int mailAmount){
 			messageSize += calculate_mail_header_size(mails[i]);
 		}
 	}
-	return messageSize;
+	return (messageSize);
 }
 
 void insert_mail_header_to_buffer(unsigned char *buffer, int *offset, Mail *mail) {
@@ -421,10 +425,24 @@ void insert_mail_header_to_buffer(unsigned char *buffer, int *offset, Mail *mail
 	*offset += sizeof(mail->numAttachments);
 }
 
+int calculate_non_empty_mail_amount(Mail **mails, int mailAmount) {
+
+	int i, amount = 0;
+
+	for (i = 0; i < mailAmount; i++) {
+		if (mails[i] != NULL) {
+			amount++;
+		}
+	}
+
+	return (amount);
+}
+
 int prepare_message_from_inbox_content(Mail **mails, int mailAmount, Message *message) {
 
 	int i;
 	int offset = 0;
+	int nonEmptyMails = calculate_non_empty_mail_amount(mails, mailAmount);
 
 	message->messageType = InboxContent;
 
@@ -437,11 +455,11 @@ int prepare_message_from_inbox_content(Mail **mails, int mailAmount, Message *me
 		return (ERROR);
 	}
 
-	memcpy(message->data + offset, &mailAmount, sizeof(mailAmount));
+	memcpy(message->data + offset, &nonEmptyMails, sizeof(nonEmptyMails));
 	offset += sizeof(mailAmount);
 
 	for (i = 0; i < mailAmount; i++) {
-		if (mails[i] != NULL){
+		if (mails[i] != NULL) {
 
 			memcpy(message->data + offset, &(mails[i]->id), sizeof(mails[i]->id));
 			offset += sizeof(mails[i]->id);
@@ -741,7 +759,7 @@ int send_get_attachment_message(int socket, unsigned short mailID,
 
 	message.messageType = GetAttachment;
 	message.messageSize = ThreeBytes;
-	message.size = sizeof(mailID) + 1;
+	message.size = 3;
 
 	message.data = calloc(message.size, 1);
 	if (message.data == NULL) {
@@ -755,14 +773,14 @@ int send_get_attachment_message(int socket, unsigned short mailID,
 	return (res);
 }
 
-void get_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachemntID) {
+void get_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachmentID) {
 
 	if ((message->messageType != GetAttachment)
-			|| (message->size != ThreeBytes)) {
+			|| (message->messageSize != ThreeBytes)) {
 		*mailID = ERROR_LOGICAL;
 	} else {
-		memcpy(mailID, message->data, sizeof(short));
-		memcpy(attachemntID, message->data + sizeof(short), 1);
+		memcpy(mailID, message->data, sizeof(*mailID));
+		memcpy(attachmentID, message->data + sizeof(*mailID), 1);
 	}
 
 	free_message(message);
@@ -818,7 +836,7 @@ int prepare_attachment_from_message(Message *message, Attachment *attachment) {
 		attachment->fileName = NULL;
 		return (ERROR);
 	}
-	memcpy(attachment->data, message->data + fileNameLength, 1);
+	memcpy(attachment->data, message->data + fileNameLength, attachment->size);
 
 	return (0);
 }
@@ -856,7 +874,7 @@ int recv_delete_result(int socket) {
 	res = recv_message(socket, &message);
 	if (res != 0) {
 		free_message(&message);
-		return res;
+		return (res);
 	} else {
 		if (message.messageType == InvalidID) {
 			free_message(&message);

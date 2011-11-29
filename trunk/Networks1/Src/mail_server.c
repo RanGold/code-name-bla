@@ -258,6 +258,7 @@ int main(int argc, char** argv) {
 		return (ERROR);
 	}
 
+	memset(&message, 0, sizeof(Message));
 	do {
 
 		/* Prepare structure for client address */
@@ -326,14 +327,14 @@ int main(int argc, char** argv) {
 						mail = get_mail_by_id(curUser, mailID, &mailIndex);
 						if (mail == NULL) {
 							send_empty_message(clientSocket, InvalidID);
-						}
-
-						res = send_message_from_mail(clientSocket, mail);
-						if (res == ERROR) {
-							print_error();
-							break;
-						} else if (res == ERROR_LOGICAL) {
-							print_error_message(INVALID_DATA_MESSAGE);
+						} else {
+							res = send_message_from_mail(clientSocket, mail);
+							if (res == ERROR) {
+								print_error();
+								break;
+							} else if (res == ERROR_LOGICAL) {
+								print_error_message(INVALID_DATA_MESSAGE);
+							}
 						}
 					} else if (message.messageType == GetAttachment) {
 
@@ -347,14 +348,15 @@ int main(int argc, char** argv) {
 								attachmentID);
 						if (attachment == NULL) {
 							send_empty_message(clientSocket, InvalidID);
-						}
-
-						res = send_message_from_attachment(clientSocket, attachment);
-						if (res == ERROR) {
-							print_error();
-							break;
-						} else if (res == ERROR_LOGICAL) {
-							print_error_message(INVALID_DATA_MESSAGE);
+						} else {
+							res = send_message_from_attachment(clientSocket,
+									attachment);
+							if (res == ERROR) {
+								print_error();
+								break;
+							} else if (res == ERROR_LOGICAL) {
+								print_error_message(INVALID_DATA_MESSAGE);
+							}
 						}
 					} else if (message.messageType == DeleteMail) {
 						get_mail_id_from_message(&message, &mailID, DeleteMail);
