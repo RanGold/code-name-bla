@@ -26,11 +26,8 @@
 
 #include "common.h"
 
-int send_show_inbox(int sourceSocket) {
-	return send_empty_message(sourceSocket, ShowInbox);
-}
-
 int save_file_from_attachment(Attachment *attachment, char *savePath) {
+
 	FILE *file;
 	char *path;
 	int pathLength;
@@ -97,6 +94,163 @@ void print_mail(Mail *mail) {
 	printf("\nText: %s\n", mail->body);
 }
 
+int handle_return_value(int res) {
+
+	if (res == ERROR) {
+		print_error();
+	} else if (res == ERROR_LOGICAL) {
+		print_error_message(INVALID_DATA_MESSAGE);
+		res = ERROR;
+	} else if (res == ERROR_INVALID_ID) {
+		print_error_message(INVALID_ID_MESSAGE);
+		res = ERROR_INVALID_ID;
+	} else if (res == ERROR_SOCKET_CLOSED) {
+		print_error_message(SOCKET_CLOSED_MESSAGE);
+		res = ERROR;
+	}
+
+	return res;
+}
+
+int count_occurrences(char *str, char chr) {
+
+	int i, occ = 0, length = strlen(str);
+
+	for (i = 0; i < length; i++) {
+		if (str[i] == chr) {
+			occ++;
+		}
+	}
+
+	return occ;
+}
+
+int insert_file_data_to_attachment(Attachment *attachment, char* path) {
+
+	/* TODO: convert path to absolute */
+	char* temp;
+	FILE* file = get_valid_file(path);
+	int readBytes;
+
+	if (file == NULL) {
+		return (ERROR);
+	}
+
+	memset(attachment, 0 , sizeof(Attachment));
+
+	/* Preparing size */
+	attachment->size = fseek(file, 0, SEEK_END);
+	fseek(file, 0, SEEK_SET);
+
+	/* Preparing file name */
+	temp = strrchr(path, '/') + 1;
+	attachment->fileName = (char*)calloc(strlen(temp) + 1, 1);
+	if (attachment->fileName == NULL) {
+		free_attachment(attachment);
+		return (ERROR);
+	}
+	strncpy(attachment->fileName, temp, strlen(temp));
+
+	/* Preparing data */
+	attachment->data = (unsigned char*)calloc(attachment->size, 1);
+	if (attachment->data == NULL) {
+		free_attachment(attachment);
+		return (ERROR);
+	}
+	readBytes = fread(attachment->data, 1, attachment->size, file);
+	if (readBytes != attachment->size) {
+		free_attachment(attachment);
+		return (ERROR);
+	}
+
+	return (0);
+}
+
+int prepare_mail_from_compose_input(Mail *mail, char *curUser, char *tempRecipients, char *tempSubject, char *tempAttachments, char *tempText) {
+
+	int i, res;
+	char* temp;
+
+	memset(mail, 0, sizeof(mail));
+
+	/* Preparing sender */
+	mail->sender = calloc(strlen(curUser) + 1, 1);
+	if (mail->sender == NULL) {
+		return (ERROR);
+	}
+	strncpy(mail->sender, curUser, strlen(curUser));
+
+	/* Preparing subject */
+	mail->subject = calloc(strlen(tempSubject) + 1, 1);
+	if (mail->subject == NULL) {
+		free_mail(mail);
+		return (ERROR);
+	}
+	strncpy(mail->subject, tempSubject, strlen(tempSubject));
+
+	/* Preparing text */
+	mail->body = calloc(strlen(tempText) + 1, 1);
+	if (mail->body == NULL) {
+		free_mail(mail);
+		return (ERROR);
+	}
+	strncpy(mail->body, tempText, strlen(tempText));
+
+	/* Preparing recipients */
+	mail->numRecipients = count_occurrences(tempRecipients, ',') + 1;
+	mail->recipients = (char**)calloc(mail->numRecipients, sizeof(char*));
+	if (mail->recipients == NULL) {
+		free_mail(mail);
+		return (ERROR);
+	}
+
+	temp = strtok(tempRecipients, " ,");
+	if (temp == NULL) {
+		free_mail(mail);
+		return (ERROR);
+	}
+
+	for (i = 0; i < mail->numRecipients; i++) {
+		mail->recipients[i] = calloc(strlen(temp) + 1, 1);
+		if (mail->recipients[i] == NULL) {
+			free_mail(mail);
+			return (ERROR);
+		}
+		strncpy(mail->recipients[i], temp, strlen(temp));
+
+		temp = strtok(NULL, " ,");
+	}
+
+	/* Preparing attachments */
+	mail->numAttachments = count_occurrences(tempRecipients, '"') / 2;
+
+	if (mail->numAttachments > 0) {
+		mail->attachments = (Attachment*) calloc(mail->numAttachments,
+				sizeof(Attachment));
+		if (mail->attachments == NULL) {
+			free_mail(mail);
+			return (ERROR);
+		}
+
+		temp = strtok(tempAttachments, "\",");
+		if (temp == NULL) {
+			free_mail(mail);
+			return (ERROR);
+		}
+
+		for (i = 0; i < mail->numAttachments; i++) {
+			res = insert_file_data_to_attachment(mail->attachments + i, temp);
+			if (res == ERROR) {
+				free_mail(mail);
+				return (ERROR);
+			}
+
+			temp = strtok(NULL, " ,");
+		}
+	}
+	return (0);
+}
+
 /* TODO: make sure whenever error this returns -1 */
 int main(int argc, char** argv) {
 
@@ -106,7 +260,6 @@ int main(int argc, char** argv) {
 	int clientSocket;
 	struct addrinfo hints, *servinfo;
 	int res;
-	Message message;
 	char* stringMessage;
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
@@ -155,17 +308,11 @@ int main(int argc, char** argv) {
 
 	/* Receiving welcome message */
 	res = recv_string_from_message(clientSocket, &stringMessage);
+	res = handle_return_value(res);
 
-	if (res != 0) {
+	if (res == ERROR) {
 		close(clientSocket);
 		freeaddrinfo(servinfo);
-		if (res == ERROR) {
-			print_error();
-		} else if (res == ERROR_LOGICAL) {
-			print_error_message(INVALID_DATA_MESSAGE);
-		} else {
-			print_error_message(INVALID_DATA_MESSAGE);
-		}
 		return ERROR;
 	} else {
 		printf("%s\n", stringMessage);
@@ -175,172 +322,136 @@ int main(int argc, char** argv) {
 	do {
 		fgets(input, MAX_INPUT_LEN, stdin);
 		if (strcmp(input, QUIT_MESSAGE) == 0) {
-			if (send_empty_message(clientSocket, Quit) == 0) {
-				break;
-			} else if (res == ERROR) {
-				print_error();
-				break;
-			} else if (res == ERROR_LOGICAL) {
-				print_error_message(INVALID_DATA_MESSAGE);
-				break;
-			} else {
-				break;
-			}
+			res = send_empty_message(clientSocket, Quit);
+			res = handle_return_value(res);
+			break;
 		} else if (!isLoggedIn) {
 			if ((sscanf(input, "User: %s", userName) + scanf("Password: %s",
 					password)) != 2) {
 				print_error_message(CREDENTIALS_USAGE_MESSAGE);
 			} else {
 				res = send_message_from_credentials(clientSocket, userName, password);
+				res = handle_return_value(res);
 				if (res == ERROR) {
-					print_error();
-					break;
-				} else if (res == ERROR_LOGICAL) {
-					print_error_message(INVALID_DATA_MESSAGE);
 					break;
 				}
 
-				res = recv_credentials_result(clientSocket);
-				if (res == 1) {
-					isLoggedIn = 1;
-					printf("Connected to server\n");
-				} else if (res == 0) {
-					print_error_message(WRONG_CREDENTIALS_MESSAGE);
-				} else if (res == ERROR_LOGICAL) {
-					print_error_message(INVALID_DATA_MESSAGE);
+				res = recv_credentials_result(clientSocket, &isLoggedIn);
+				res = handle_return_value(res);
+				if (res == ERROR) {
 					break;
 				} else {
-					print_error();
-					break;
+					if (isLoggedIn) {
+						printf("Connected to server\n");
+					} else {
+						print_error_message(WRONG_CREDENTIALS_MESSAGE);
+					}
 				}
 			}
 			/* Flushing */
 			fgets(input, MAX_INPUT_LEN, stdin);
 		} else if (strcmp(input, SHOW_INBOX) == 0) {
-			res = send_show_inbox(clientSocket);
+			res = send_empty_message(clientSocket, ShowInbox);
+			res = handle_return_value(res);
 			if (res == ERROR) {
-				print_error();
-				break;
-			} else if (res == ERROR_LOGICAL) {
-				print_error_message(INVALID_DATA_MESSAGE);
 				break;
 			}
 
 			mailAmount = -1;
 			mails = NULL;
 			res = recv_inbox_content_from_message(clientSocket, &mails, &mailAmount);
-			if (res != 0) {
-				free_mails(mailAmount, mails);
+			res = handle_return_value(res);
+			if (res == ERROR) {
 				if (mails != NULL) {
+					free_mails(mailAmount, mails);
 					free(mails);
 				}
-				if (res == ERROR_LOGICAL) {
-					print_error_message(INVALID_DATA_MESSAGE);
-					break;
-				} else {
-					print_error();
-					break;
-				}
+				break;
 			}
 
 			print_inbox_info(mailAmount, mails);
 			free_mails(mailAmount, mails);
 		} else if (sscanf(input, GET_MAIL "%hu", &mailID) == 1) {
 			res = send_get_mail_message(clientSocket, mailID);
+			res = handle_return_value(res);
 			if (res == ERROR) {
-				print_error();
-				break;
-			} else if (res == ERROR_LOGICAL) {
-				print_error_message(INVALID_DATA_MESSAGE);
 				break;
 			}
 
 			res = recv_mail_from_message(clientSocket, &mail);
-			if (res != 0) {
+			res = handle_return_value(res);
+			if (res == ERROR) {
 				free_mail(&mail);
-				if (res == ERROR_INVALID_ID) {
-					print_error_message(INVALID_ID_MESSAGE);
-				} else {
-					print_error();
-				}
 				break;
+			} else if (res == ERROR_INVALID_ID) {
+				free_mail(&mail);
+				continue;
+			} else {
+				print_mail(&mail);
+				free_mail(&mail);
 			}
-
-			print_mail(&mail);
-			free_mail(&mail);
 		} else if (sscanf(input, GET_ATTACHMENT "%hu %hu \"%[^\"]\"", &mailID,
 				&tempAttachmentID, attachmentPath) == 3) {
 			attachmentID = (unsigned char)(tempAttachmentID & 0xFF);
 			res = send_get_attachment_message(clientSocket, mailID,
 					attachmentID);
+			res = handle_return_value(res);
 			if (res == ERROR) {
-				print_error();
-				break;
-			} else if (res == ERROR_LOGICAL) {
-				print_error_message(INVALID_DATA_MESSAGE);
 				break;
 			}
 
 			res = recv_attachment_from_message(clientSocket, &attachment);
-			if (res != 0) {
-				free_attachment(&attachment);
-				if (res == ERROR_INVALID_ID) {
-					print_error_message(INVALID_ID_MESSAGE);
-				} else {
-					print_error();
-				}
+			res = handle_return_value(res);
+			if (res == ERROR) {
+				free_mail(&mail);
 				break;
-			}
-
-			if (save_file_from_attachment(&attachment, attachmentPath) != 0) {
-				free_attachment(&attachment);
-				print_error();
-				break;
+			} else if (res == ERROR_INVALID_ID) {
+				free_mail(&mail);
+				continue;
 			} else {
-				printf ("‫‪Attachment saved‬‬\n");
-			}
+				if (save_file_from_attachment(&attachment, attachmentPath) != 0) {
+					free_attachment(&attachment);
+					print_error();
+					break;
+				} else {
+					printf("‫‪Attachment saved‬‬\n");
+				}
 
-			free_attachment(&attachment);
+				free_attachment(&attachment);
+			}
 		} else if (sscanf(input, DELETE_MAIL "%hu", &mailID) == 1) {
 			res = send_delete_mail_message(clientSocket, mailID);
+			res = handle_return_value(res);
 			if (res == ERROR) {
-				print_error();
-				break;
-			} else if (res == ERROR_LOGICAL) {
-				print_error_message(INVALID_DATA_MESSAGE);
 				break;
 			}
-			free_message(&message);
 
 			res = recv_delete_result(clientSocket);
-			if (res == ERROR_INVALID_ID) {
-				print_error_message(INVALID_ID_MESSAGE);
-			} else if (res == ERROR_LOGICAL) {
-				print_error_message(INVALID_DATA_MESSAGE);
-				break;
-			} else if (res == ERROR) {
-				print_error();
+			res = handle_return_value(res);
+			if (res == ERROR) {
 				break;
 			}
 		} else if (strcmp(input, COMPOSE) == 0) {
-			if ((scanf("To: %s", tempRecipients) != 1) ||
-					(scanf("Subject: %s", tempSubject) != 1) ||
-					(scanf("Attachments: %s", tempAttachments) != 1) ||
-					(scanf("Text: %s", tempText) != 1)) {
+			if ((scanf("To: %[^\n]", tempRecipients) != 1) ||
+					(scanf("Subject: %[^\n]", tempSubject) != 1) ||
+					(scanf("Attachments: %[^\n]", tempAttachments) != 1) ||
+					(scanf("Text: %[^\n]", tempText) != 1)) {
 				print_error_message(COMPOSE_USAGE_MESSAGE);
 			} else {
-
+				res = prepare_mail_from_compose_input(&mail, userName, tempRecipients, tempSubject, tempAttachments, tempText);
+				/* TODO: need to send attachments also */
+				res = send_message_from_mail(clientSocket, &mail);
+				res = handle_return_value(res);
+				if (res == ERROR) {
+					break;
+				}
 			}
 		} else {
 			print_error_message("Invalid command");
 		}
-
-		free_message(&message);
 	} while (1);
 
 	/* Close connection and socket */
-	/*TODO: maybe free Message data ?*/
-	free_message(&message);
 	close(clientSocket);
 	freeaddrinfo(servinfo);
 

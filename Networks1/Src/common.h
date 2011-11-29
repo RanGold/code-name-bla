@@ -8,6 +8,7 @@
 #define ERROR_LOGICAL -3
 #define ERROR_INVALID_ID -4
 #define INVALID_DATA_MESSAGE "Invalid data received"
+#define SOCKET_CLOSED_MESSAGE "socket closed"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,14 +46,14 @@ typedef enum MessageType {
 	CredentialsDeny,
 	ShowInbox,
 	InboxContent,
-	Compose,
 	GetMail,
 	MailContent,
 	GetAttachment,
 	AttachmentContent,
 	InvalidID,
 	DeleteMail,
-	DeleteApprove
+	DeleteApprove,
+	SendApprove
 } MessageType;
 
 typedef enum MessageSize {
@@ -85,10 +86,7 @@ int send_message_from_credentials(int socket, char* userName, char* password);
 
 int prepare_credentials_from_message(Message* message, char* userName, char* password);
 
-/* return ERROR on error
- *         1 on accept
- *		   0 on reject */
-int recv_credentials_result(int socket);
+int recv_credentials_result(int socket, int *isLoggedIn);
 
 int send_empty_message(int socket, MessageType type);
 
@@ -112,7 +110,7 @@ int recv_mail_from_message(int socket, Mail *mail);
 
 int send_get_attachment_message(int socket, unsigned short mailID, unsigned char attachmentID);
 
-void get_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachemntID);
+void get_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachmentID);
 
 int send_message_from_attachment(int socket, Attachment *attachment);
 
@@ -121,5 +119,7 @@ int recv_attachment_from_message(int socket, Attachment *attachment);
 int send_delete_mail_message(int socket, unsigned short mailID);
 
 int recv_delete_result(int socket);
+
+void get_absolute_path(char* relPath, char** absPath);
 
 FILE* get_valid_file(char* fileName);
