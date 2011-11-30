@@ -10,7 +10,7 @@
 #define CLIENT_USAGE_MESSAGE "Usage mail_client [hostname [port]]"
 #define CREDENTIALS_USAGE_MESSAGE "Expected:\nUser: [username]\nPassword: [password]"
 #define WRONG_CREDENTIALS_MESSAGE "Wrong credentials"
-#define COMPOSE_USAGE_MESSAGE "Expected:\nTo: [username,...]\nSubject: [subject]\nAttachments: [path,..]\nText: [text]"
+#define COMPOSE_USAGE_MESSAGE "Expected:\nTo: [username,...]\nSubject: [subject]\nAttachments: [\"path\",..]\nText: [text]"
 #define INVALID_ID_MESSAGE "Invalid id requested"
 #define INVALID_COMMAND_MESSAGE "Invalid command"
 
@@ -175,13 +175,6 @@ int prepare_mail_from_compose_input(Mail *mail, char *curUser, char *tempRecipie
 	char* temp;
 
 	memset(mail, 0, sizeof(mail));
-
-	/* Preparing sender */
-	mail->sender = calloc(strlen(curUser) + 1, 1);
-	if (mail->sender == NULL) {
-		return (ERROR);
-	}
-	strncpy(mail->sender, curUser, strlen(curUser));
 
 	/* Preparing subject */
 	mail->subject = calloc(strlen(tempSubject) + 1, 1);
@@ -435,10 +428,10 @@ int main(int argc, char** argv) {
 				break;
 			}
 		} else if (strcmp(input, COMPOSE) == 0) {
-			if ((scanf("To: %[^\n]", tempRecipients) != 1) ||
-					(scanf("Subject: %[^\n]", tempSubject) != 1) ||
-					(scanf("Attachments: %[^\n]", tempAttachments) != 1) ||
-					(scanf("Text: %[^\n]", tempText) != 1)) {
+			if ((scanf("To: %[^\n]\n", tempRecipients) +
+					scanf("Subject: %[^\n]\n", tempSubject) +
+					scanf("Attachments: %[^\n]\n", tempAttachments) +
+					scanf("Text: %[^\n]\n", tempText)) != 4) {
 				print_error_message(COMPOSE_USAGE_MESSAGE);
 			} else {
 				res = prepare_mail_from_compose_input(&mail, userName, tempRecipients, tempSubject, tempAttachments, tempText);
