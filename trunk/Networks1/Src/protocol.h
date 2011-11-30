@@ -104,3 +104,5 @@ int send_delete_mail_message(int socket, unsigned short mailID);
 int recv_delete_result(int socket);
 
 int send_compose_message_from_mail(int socket, Mail *mail);
+
+int prepare_mail_from_compose_message(Message *message, Mail **mail);

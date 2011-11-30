@@ -10,7 +10,8 @@
 typedef struct {
 	char name[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
-	int mailAmount;
+	int mailsUsed;
+	int mailArraySize;
 	Mail** mails;
 } User;
 
@@ -54,13 +55,14 @@ void create_stub(User *user){
 	strcpy(mail2.body, "Hey there, sup?");
 	mail2.numRefrences = 1;
 
-	user->mails = calloc(3, sizeof(Mail*));
+	user->mails = calloc(4, sizeof(Mail*));
 	user->mails[0] = calloc(sizeof(Mail), 1);
 	*(user->mails[0]) = mail1;
 	user->mails[1] = NULL;
 	user->mails[2] = calloc(sizeof(Mail), 1);
 	*(user->mails[2]) = mail2;
-	user->mailAmount = 3;
+	user->mailsUsed = 2;
+	user->mailArraySize = 4;
 
 }
 
@@ -83,6 +85,22 @@ int count_rows(FILE* file) {
 	return (lastChar == '\n' ? counter : ++counter);
 }
 
+void free_users_array(User *users, int usersAmount) {
+
+	int i, j;
+
+	for (i = 0; i < usersAmount; i++) {
+		for (j = 0; j <= users[i].mailsUsed; j++) {
+			if (users[i].mails[j] != NULL) {
+				free_mail(users[i].mails[j]);
+			}
+		}
+		free(users[i].mails);
+	}
+
+	free(users);
+}
+
 int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
 
 	int i;
@@ -103,30 +121,22 @@ int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
 
 		if (fscanf(usersFile, "%s\t%s", (*users)[i].name, (*users)[i].password) != 2) {
 			fclose(usersFile);
+			free_users_array(*users, *usersAmount);
 			return (ERROR);
 		}
 
-		(*users)[i].mailAmount = 0;
+		(*users)[i].mailsUsed = 0;
+		(*users)[i].mailArraySize = 1;
+		(*users)[i].mails = calloc(1, sizeof(Mail*));
+		if ((*users)[i].mails == NULL) {
+			fclose(usersFile);
+			free_users_array(*users, *usersAmount);
+			return (ERROR);
+		}
 	}
 
 	fclose(usersFile);
 	return (0);
-}
-
-void free_users_array(User *users, int usersAmount) {
-
-	int i, j;
-
-	for (i = 0; i < usersAmount; i++) {
-		for (j = 0; j < users[i].mailAmount; j++) {
-			if (users[i].mails[j] != NULL) {
-				free_mail(users[i].mails[j]);
-			}
-		}
-		free(users[i].mails);
-	}
-
-	free(users);
 }
 
 User* check_credentials_message(User* users, int usersAmount, Message *message) {
@@ -152,7 +162,7 @@ Mail* get_mail_by_id (User *user, unsigned short mailID, int *mailIndex) {
 
 	int i;
 
-	for (i = 0; i < user->mailAmount; i++) {
+	for (i = 0; i <= user->mailsUsed; i++) {
 		if ((user->mails[i] != NULL) && (user->mails[i]->id == mailID)) {
 			*mailIndex = i;
 			return (user->mails[i]);
@@ -226,7 +236,43 @@ int initiallize_listen_socket(int *listenSocket, short port) {
 	return (0);
 }
 
+int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *mail) {
+
+	int i, j;
+
+	/* Setting sender */
+	mail->sender = calloc(strlen(curUserName) + 1, 1);
+	if (mail->sender == NULL) {
+		return (ERROR);
+	}
+	strncpy(mail->sender, curUserName, strlen(curUserName));
+
+	/* Adding mail to recipients */
+	/* TODO: what about non exiting recipients? */
+	mail->numRefrences = 0;
+	for (i = 0; i < usersAmount; i++) {
+		for (j = 0; j < mail->numRecipients; j++) {
+			if (strcmp(mail->recipients[j], users[i].name) == 0) {
+				/* Checking if the mail array should be enlarged */
+				if (users[i].mailsUsed == users[i].mailArraySize) {
+					users[i].mailArraySize *= 2;
+					users[i].mails = realloc(users[i].mails, users[i].mailArraySize);
+					if (users[i].mails == NULL) {
+						return(ERROR);
+					}
+				}
+
+				users[i].mails[users[i].mailsUsed] = mail;
+				users[i].mailsUsed++;
+			}
+		}
+	}
+
+	return (0);
+}
+
 /* TODO: make sure whenever error this returns -1 */
+/* TODO: review error situations and actions */
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
@@ -253,6 +299,8 @@ int main(int argc, char** argv) {
 	res = initialliaze_users_array(&usersAmount, &users, argv[1]);
 	if (res == ERROR) {
 		print_error_message(INIT_USER_ARR_FAILED);
+		print_error();
+		return(ERROR);
 	}
 
 	if (initiallize_listen_socket(&listenSocket, port) == ERROR) {
@@ -312,7 +360,7 @@ int main(int argc, char** argv) {
 							print_error_message(INVALID_DATA_MESSAGE);
 						}
 					} else if (message.messageType == ShowInbox) {
-						res = send_message_from_inbox_content(clientSocket, curUser->mails, curUser->mailAmount);
+						res = send_message_from_inbox_content(clientSocket, curUser->mails, curUser->mailsUsed);
 						if (res == ERROR) {
 							print_error();
 							break;
@@ -375,10 +423,19 @@ int main(int argc, char** argv) {
 								DeleteApprove) != 0)) {
 							print_error();
 						}
+					} else if (message.messageType == Compose) {
+						res = prepare_mail_from_compose_message(&message, &mail);
+						if (res != 0) {
+							print_error();
+							break;
+						}
+
+						res = add_mail_to_server(users, usersAmount, curUser->name, mail);
 					} else {
 						res = send_empty_message(clientSocket, InvalidCommand);
 						if (res == ERROR) {
 							print_error();
+							break;
 						}
 					}
 

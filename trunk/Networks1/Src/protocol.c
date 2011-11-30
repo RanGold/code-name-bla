@@ -379,7 +379,9 @@ void free_mails(int mailAmount, Mail *mails) {
 	int i;
 
 	for (i = 0; i < mailAmount; i++) {
-		free_mail(mails + i);
+		if (mails + i != NULL) {
+			free_mail(mails + i);
+		}
 	}
 }
 
@@ -515,7 +517,7 @@ int prepare_inbox_content_from_message(Message *message, Mail **mails, int *mail
 	int i;
 
 	/* Getting mail amount */
-	memcpy(mailAmount, message->data, sizeof(*mailAmount));
+	memcpy(mailAmount, message->data + offset, sizeof(*mailAmount));
 	offset += sizeof(*mailAmount);
 
 	if (*mailAmount > 0) {
@@ -612,10 +614,38 @@ void get_mail_id_from_message(Message *message, unsigned short *mailID, MessageT
 	free_message(message);
 }
 
+void insert_mail_contents_to_buffer(unsigned char *buffer, int *offset, Mail *mail) {
+
+	int i;
+	int recipientNameLen, attachemntNameLen, bodyLen;
+
+	/* Inserting attachments names */
+	for (i = 0; i < mail->numAttachments; i++) {
+		attachemntNameLen = strlen(mail->attachments[i].fileName) + 1;
+		memcpy(buffer + *offset, mail->attachments[i].fileName,
+				attachemntNameLen);
+		*offset += attachemntNameLen;
+	}
+
+	/* Inserting recipients */
+	memcpy(buffer + *offset, &(mail->numRecipients),
+			sizeof(mail->numRecipients));
+	*offset += sizeof(mail->numRecipients);
+	for (i = 0; i < mail->numRecipients; i++) {
+		recipientNameLen = strlen(mail->recipients[i]) + 1;
+		memcpy(buffer + *offset, mail->recipients[i], recipientNameLen);
+		*offset += recipientNameLen;
+	}
+
+	/* Inserting body */
+	bodyLen = strlen(mail->body) + 1;
+	memcpy(buffer + *offset, mail->body, bodyLen);
+	*offset += bodyLen;
+}
+
 int prepare_message_from_mail(Mail *mail, Message *message) {
 
-	int offset = 0, i;
-	int recipientNameLen, attachemntNameLen, bodyLen;
+	int offset = 0;
 
 	message->messageType = MailContent;
 	message->size = calculate_mail_size(mail);
@@ -627,26 +657,7 @@ int prepare_message_from_mail(Mail *mail, Message *message) {
 
 	insert_mail_header_to_buffer(message->data, &offset, mail);
 
-	/* Inserting attachments names */
-	for (i = 0; i < mail->numAttachments; i++) {
-		attachemntNameLen = strlen(mail->attachments[i].fileName) + 1;
-		memcpy(message->data + offset, mail->attachments[i].fileName, attachemntNameLen);
-		offset += attachemntNameLen;
-	}
-
-	/* Inserting recipients */
-	memcpy(message->data + offset, &(mail->numRecipients), sizeof(mail->numRecipients));
-	offset += sizeof(mail->numRecipients);
-	for (i = 0; i < mail->numRecipients; i++) {
-		recipientNameLen = strlen(mail->recipients[i]) + 1;
-		memcpy(message->data + offset, mail->recipients[i], recipientNameLen);
-		offset += recipientNameLen;
-	}
-
-	/* Inserting body */
-	bodyLen = strlen(mail->body) + 1;
-	memcpy(message->data + offset, mail->body, bodyLen);
-	offset += bodyLen;
+	insert_mail_contents_to_buffer(message->data, &offset, mail);
 
 	return (0);
 }
@@ -667,13 +678,13 @@ int send_message_from_mail(int socket, Mail *mail) {
 	return (0);
 }
 
-int prepare_mail_from_message(Message *message, Mail *mail) {
-	int offset = 0, i;
+int prepare_mail_from_message(Message *message, Mail *mail, int *offset) {
+	int i;
 	int attachmentNameLen, recipientLen, bodyLength;
 
 	memset(mail, 0, sizeof(mail));
 
-	if (prepare_mail_header_from_message(message, mail, &offset) != 0) {
+	if (prepare_mail_header_from_message(message, mail, offset) != 0) {
 		free_mail(mail);
 		return (ERROR);
 	}
@@ -685,53 +696,53 @@ int prepare_mail_from_message(Message *message, Mail *mail) {
 		return (ERROR);
 	}
 	for (i = 0; i < mail->numAttachments; i++) {
-		attachmentNameLen = strlen((char*) (message->data + offset)) + 1;
+		attachmentNameLen = strlen((char*) (message->data + *offset)) + 1;
 		mail->attachments[i].fileName = calloc(attachmentNameLen, 1);
 		if (mail->attachments[i].fileName == NULL) {
 			free_mail(mail);
 			return (ERROR);
 		}
-		memcpy(mail->attachments[i].fileName, message->data + offset,
+		memcpy(mail->attachments[i].fileName, message->data + *offset,
 				attachmentNameLen);
-		offset += attachmentNameLen;
+		*offset += attachmentNameLen;
 	}
 
 	/* Preparing recipients names */
-	memcpy(&(mail->numRecipients), message->data + offset,
+	memcpy(&(mail->numRecipients), message->data + *offset,
 			sizeof(mail->numRecipients));
-	offset += sizeof(mail->numRecipients);
+	*offset += sizeof(mail->numRecipients);
 	mail->recipients = calloc(mail->numRecipients, sizeof(char*));
 	if (mail->recipients == NULL) {
 		free_mail(mail);
 		return (ERROR);
 	}
 	for (i = 0; i < mail->numRecipients; i++) {
-		recipientLen = strlen((char*) (message->data + offset)) + 1;
+		recipientLen = strlen((char*) (message->data + *offset)) + 1;
 		mail->recipients[i] = calloc(recipientLen, 1);
 		if (mail->recipients[i] == NULL) {
 			free_mail(mail);
 			return (ERROR);
 		}
-		memcpy(mail->recipients[i], message->data + offset, recipientLen);
+		memcpy(mail->recipients[i], message->data + *offset, recipientLen);
 		offset += recipientLen;
 	}
 
 	/* Prepare body */
-	bodyLength = strlen((char*) (message->data + offset)) + 1;
+	bodyLength = strlen((char*) (message->data + *offset)) + 1;
 	mail->body = (char*) calloc(bodyLength, 1);
 	if (mail->body == NULL) {
 		free_mail(mail);
 		return (ERROR);
 	}
-	memcpy(mail->body, message->data + offset, bodyLength);
-	offset += bodyLength;
+	memcpy(mail->body, message->data + *offset, bodyLength);
+	*offset += bodyLength;
 
 	return (0);
 }
 
 int recv_mail_from_message(int socket, Mail *mail) {
 
-	int res;
+	int res, offset = 0;
 	Message message;
 
 	res = recv_typed_message(socket, &message, MailContent);
@@ -739,7 +750,7 @@ int recv_mail_from_message(int socket, Mail *mail) {
 		return (res);
 	}
 
-	res = prepare_mail_from_message(&message, mail);
+	res = prepare_mail_from_message(&message, mail, &offset);
 	free_message(&message);
 	return (res);
 }
@@ -873,12 +884,61 @@ int recv_delete_result(int socket) {
 	}
 }
 
+int calculate_full_mail_size(Mail *mail) {
+
+	int i, size = calculate_mail_size(mail);
+
+	for (i = 0; i < mail->numAttachments; i++) {
+		size += sizeof(mail->attachments[i].size);
+		size += mail->attachments[i].size;
+	}
+
+	return size;
+}
+
+void insert_mail_attachments_to_buffer(unsigned char *buffer, int *offset, Mail *mail) {
+
+	int i;
+
+	/* Inserting attachments data */
+	for (i = 0; i < mail->numAttachments; i++) {
+		memcpy(buffer + *offset, &(mail->attachments[i].size),
+				sizeof(mail->attachments[i].size));
+		*offset += sizeof(mail->attachments[i].size);
+
+		memcpy(buffer + *offset, mail->attachments[i].data,
+						mail->attachments[i].size);
+		*offset += mail->attachments[i].size;
+	}
+}
+
+int prepare_compose_message_from_mail(Mail *mail, Message *message) {
+
+	int offset = 0;
+
+	message->messageType = Compose;
+	message->size = calculate_full_mail_size(mail);
+	message->messageSize = VariedSize;
+	message->data = calloc(message->size, 1);
+	if (message->data == NULL) {
+		return (ERROR);
+	}
+
+	insert_mail_header_to_buffer(message->data, &offset, mail);
+
+	insert_mail_contents_to_buffer(message->data, &offset, mail);
+
+	insert_mail_attachments_to_buffer(message->data, &offset, mail);
+
+	return (0);
+}
+
 int send_compose_message_from_mail(int socket, Mail *mail) {
 
 	int res;
 	Message message;
 
-	if (prepare_message_from_mail(mail, &message) != 0) {
+	if (prepare_compose_message_from_mail(mail, &message) != 0) {
 		return (ERROR);
 	}
 
@@ -889,3 +949,51 @@ int send_compose_message_from_mail(int socket, Mail *mail) {
 	return (0);
 }
 
+int prepare_mail_attachments_from_message(Message *message, Mail *mail, int *offset) {
+
+	int i;
+
+	/* Getting attachments data */
+	for (i = 0; i < mail->numAttachments; i++) {
+		memcpy(&(mail->attachments[i].size), message->data + *offset,
+				sizeof(mail->attachments[i].size));
+		*offset += sizeof(mail->attachments[i].size);
+
+		mail->attachments[i].data = calloc(mail->attachments[i].size, 1);
+		if (mail->attachments[i].data == NULL) {
+			free_mail(mail);
+			return (ERROR);
+		}
+		memcpy(mail->attachments[i].data, message->data + *offset,
+				mail->attachments[i].size);
+		*offset += mail->attachments[i].size;
+	}
+
+	return (0);
+}
+
+int prepare_mail_from_compose_message(Message *message, Mail **mail) {
+
+	int res, offset = 0;
+
+	*mail = calloc(1, sizeof(Mail));
+	if (*mail == NULL) {
+		free_message(message);
+		return (ERROR);
+	}
+
+	res = prepare_mail_from_message(message, *mail, &offset);
+	if (res != 0) {
+		free_message(message);
+		return (res);
+	}
+
+	res = prepare_mail_attachments_from_message(message, *mail, &offset);
+	if (res != 0) {
+		free_message(message);
+		return (res);
+	}
+
+	free_message(message);
+	return (0);
+}
