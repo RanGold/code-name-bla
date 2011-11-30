@@ -5,8 +5,9 @@
 #define DEAFULT_PORT 6423
 
 #include "common.h"
+#include "protocol.h"
 
-typedef struct User {
+typedef struct {
 	char name[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
 	int mailAmount;
@@ -88,7 +89,7 @@ int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
 	FILE* usersFile;
 
 	/* Get file for reading */
-	usersFile = get_valid_file(filePath);
+	usersFile = get_valid_file(filePath, "r");
 	if (usersFile == NULL) {
 		return (ERROR);
 	}
@@ -118,7 +119,9 @@ void free_users_array(User *users, int usersAmount) {
 
 	for (i = 0; i < usersAmount; i++) {
 		for (j = 0; j < users[i].mailAmount; j++) {
-			free_mail(users[i].mails[j]);
+			if (users[i].mails[j] != NULL) {
+				free_mail(users[i].mails[j]);
+			}
 		}
 		free(users[i].mails);
 	}
@@ -373,7 +376,10 @@ int main(int argc, char** argv) {
 							print_error();
 						}
 					} else {
-						/* TODO: send error command message */
+						res = send_empty_message(clientSocket, InvalidCommand);
+						if (res == ERROR) {
+							print_error();
+						}
 					}
 
 					free_message(&message);

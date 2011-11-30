@@ -12,6 +12,7 @@
 #define WRONG_CREDENTIALS_MESSAGE "Wrong credentials"
 #define COMPOSE_USAGE_MESSAGE "Expected:\nTo: [username,...]\nSubject: [subject]\nAttachments: [path,..]\nText: [text]"
 #define INVALID_ID_MESSAGE "Invalid id requested"
+#define INVALID_COMMAND_MESSAGE "Invalid command"
 
 /* Commands definitions */
 #define QUIT_MESSAGE "QUIT\n"
@@ -21,10 +22,12 @@
 #define DELETE_MAIL "DELETE_MAIL "
 #define COMPOSE "COMPOSE\n"
 
-/* General definitions */
-#define CONNECTION_SUCCEED "Connected to server"
+/* General Messages */
+#define CONNECTION_SUCCEED_MESSAGE "Connected to server\n"
+#define ATTACHMENT_SAVE_MESSAGE "‫‪Attachment saved‬‬\n"
 
 #include "common.h"
+#include "protocol.h"
 
 int save_file_from_attachment(Attachment *attachment, char *savePath) {
 
@@ -42,7 +45,7 @@ int save_file_from_attachment(Attachment *attachment, char *savePath) {
 	strcat(path, savePath);
 	strcat(path, attachment->fileName);
 
-	file = fopen(path, "w");
+	file = get_valid_file(path, "w");
 	if (file == NULL) {
 		free(path);
 		return(ERROR);
@@ -129,7 +132,7 @@ int insert_file_data_to_attachment(Attachment *attachment, char* path) {
 
 	/* TODO: convert path to absolute */
 	char* temp;
-	FILE* file = get_valid_file(path);
+	FILE* file = get_valid_file(path, "r");
 	int readBytes;
 
 	if (file == NULL) {
@@ -342,7 +345,7 @@ int main(int argc, char** argv) {
 					break;
 				} else {
 					if (isLoggedIn) {
-						printf("Connected to server\n");
+						printf(CONNECTION_SUCCEED_MESSAGE);
 					} else {
 						print_error_message(WRONG_CREDENTIALS_MESSAGE);
 					}
@@ -414,7 +417,7 @@ int main(int argc, char** argv) {
 					print_error();
 					break;
 				} else {
-					printf("‫‪Attachment saved‬‬\n");
+					printf(ATTACHMENT_SAVE_MESSAGE);
 				}
 
 				free_attachment(&attachment);
@@ -439,15 +442,14 @@ int main(int argc, char** argv) {
 				print_error_message(COMPOSE_USAGE_MESSAGE);
 			} else {
 				res = prepare_mail_from_compose_input(&mail, userName, tempRecipients, tempSubject, tempAttachments, tempText);
-				/* TODO: need to send attachments also */
-				res = send_message_from_mail(clientSocket, &mail);
+				res = send_compose_message_from_mail(clientSocket, &mail);
 				res = handle_return_value(res);
 				if (res == ERROR) {
 					break;
 				}
 			}
 		} else {
-			print_error_message("Invalid command");
+			print_error_message(INVALID_COMMAND_MESSAGE);
 		}
 	} while (1);
 
