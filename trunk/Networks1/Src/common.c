@@ -10,6 +10,24 @@ void print_error_message(char* message) {
 	fprintf(stderr, "Error: %s\n", message);
 }
 
+int handle_return_value(int res) {
+
+	if (res == ERROR) {
+		print_error();
+	} else if (res == ERROR_LOGICAL) {
+		print_error_message(INVALID_DATA_MESSAGE);
+		res = ERROR;
+	} else if (res == ERROR_INVALID_ID) {
+		print_error_message(INVALID_ID_MESSAGE);
+		res = ERROR_INVALID_ID;
+	} else if (res == ERROR_SOCKET_CLOSED) {
+		print_error_message(SOCKET_CLOSED_MESSAGE);
+		res = ERROR;
+	}
+
+	return res;
+}
+
 int get_absolute_path(char* relPath, char** absPath) {
 
 	wordexp_t exp_result;

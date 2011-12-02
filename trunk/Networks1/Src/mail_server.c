@@ -10,8 +10,8 @@
 typedef struct {
 	char name[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
-	int mailsUsed;
-	int mailArraySize;
+	unsigned short mailsUsed;
+	unsigned short mailArraySize;
 	Mail** mails;
 } User;
 
@@ -20,7 +20,9 @@ void create_stub(User *user){
 	Mail mail1, mail2;
 	FILE* file;
 
-	mail1.id = 1;
+	memset(&mail1, 0, sizeof(Mail));
+	memset(&mail2, 0, sizeof(Mail));
+
 	mail1.sender = calloc(4, 1);
 	strcpy(mail1.sender, "ran");
 	mail1.subject = calloc(5, 1);
@@ -44,7 +46,6 @@ void create_stub(User *user){
 	strcpy(mail1.recipients[1], "tammy");
 	mail1.numRefrences = 1;
 
-	mail2.id = 2;
 	mail2.sender = calloc(5, 1);
 	strcpy(mail2.sender, "amir");
 	mail2.subject = calloc(6, 1);
@@ -61,7 +62,7 @@ void create_stub(User *user){
 	user->mails[1] = NULL;
 	user->mails[2] = calloc(sizeof(Mail), 1);
 	*(user->mails[2]) = mail2;
-	user->mailsUsed = 2;
+	user->mailsUsed = 3;
 	user->mailArraySize = 4;
 
 }
@@ -158,23 +159,31 @@ User* check_credentials_message(User* users, int usersAmount, Message *message) 
 	return (NULL);
 }
 
-Mail* get_mail_by_id (User *user, unsigned short mailID, int *mailIndex) {
+void prepare_client_ids(User *user) {
 
-	int i;
+	unsigned short i;
 
-	for (i = 0; i <= user->mailsUsed; i++) {
-		if ((user->mails[i] != NULL) && (user->mails[i]->id == mailID)) {
-			*mailIndex = i;
-			return (user->mails[i]);
+	for (i = 0; i < user->mailsUsed; i++) {
+		if (user->mails[i] != NULL) {
+			user->mails[i]->clientId = i + 1;
 		}
+	}
+}
+
+Mail* get_mail_by_id (User *user, unsigned short mailID) {
+
+	if (mailID > user->mailsUsed) {
+		return (NULL);
+	} else {
+		return (user->mails[mailID - 1]);
 	}
 
 	return (NULL);
 }
 
 Attachment* get_attachment_by_id (User *user, short mailID, unsigned char attachmentID) {
-	int mailIndex;
-	Mail* mail = get_mail_by_id(user, mailID, &mailIndex);
+
+	Mail* mail = get_mail_by_id(user, mailID);
 
 	if ((mail != NULL) && (mail->numAttachments >= attachmentID)) {
 		return (mail->attachments + attachmentID - 1);
@@ -184,15 +193,15 @@ Attachment* get_attachment_by_id (User *user, short mailID, unsigned char attach
 }
 
 int delete_mail(User *user, unsigned short mailID) {
-	int mailIndex;
-	Mail *mail = get_mail_by_id(user, mailID, &mailIndex);
+
+	Mail *mail = get_mail_by_id(user, mailID);
 
 	if (mail == NULL) {
 		return (ERROR_INVALID_ID);
 	}
 
 	/* Removing reference */
-	user->mails[mailIndex] = NULL;
+	user->mails[mailID - 1] = NULL;
 	mail->numRefrences--;
 
 	if (mail->numRefrences == 0) {
@@ -240,7 +249,8 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 
 	int i, j;
 
-	/* Setting sender */
+	/* Setting sender and freeing the current empty sender */
+	free(mail->sender);
 	mail->sender = calloc(strlen(curUserName) + 1, 1);
 	if (mail->sender == NULL) {
 		return (ERROR);
@@ -248,7 +258,7 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 	strncpy(mail->sender, curUserName, strlen(curUserName));
 
 	/* Adding mail to recipients */
-	/* TODO: what about non exiting recipients? */
+	/* Ignoring non exiting recipients */
 	mail->numRefrences = 0;
 	for (i = 0; i < usersAmount; i++) {
 		for (j = 0; j < mail->numRecipients; j++) {
@@ -272,12 +282,11 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 }
 
 /* TODO: make sure whenever error this returns -1 */
-/* TODO: review error situations and actions */
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
 	short port = DEAFULT_PORT;
-	int usersAmount, res, mailIndex;
+	int usersAmount, res;
 	unsigned int len;
 	User *users = NULL, *curUser = NULL;
 	int listenSocket, clientSocket;
@@ -319,134 +328,141 @@ int main(int argc, char** argv) {
 		clientSocket = accept(listenSocket, (struct sockaddr*) &clientAddr, &len);
 		if (clientSocket == -1) {
 			print_error();
-		} else {
-			res = send_message_from_string(clientSocket, WELLCOME_MESSAGE);
-			if (res == ERROR) {
-				print_error();
-			} else if (res == ERROR_LOGICAL) {
-				print_error_message(INVALID_DATA_MESSAGE);
-			} else {
-				do {
-					res = recv_message(clientSocket, &message);
-					if (res != 0) {
-						if (res == ERROR) {
-							print_error();
-						} else if (res == ERROR_LOGICAL) {
-							print_error_message(INVALID_DATA_MESSAGE);
-						}
-						break;
-					}
-
-					if (message.messageType == Quit) {
-						break;
-					} else if (curUser == NULL) {
-						curUser = check_credentials_message(users, usersAmount,
-								&message);
-
-						if (curUser == NULL) {
-							res = send_empty_message(clientSocket,
-									CredentialsDeny);
-						} else {
-							res = send_empty_message(clientSocket,
-									CredentialsAccept);
-							/* TODO: delete this */
-							create_stub(curUser);
-						}
-
-						if (res == ERROR) {
-							print_error();
-							break;
-						} else if (res == ERROR_LOGICAL) {
-							print_error_message(INVALID_DATA_MESSAGE);
-						}
-					} else if (message.messageType == ShowInbox) {
-						res = send_message_from_inbox_content(clientSocket, curUser->mails, curUser->mailsUsed);
-						if (res == ERROR) {
-							print_error();
-							break;
-						} else if (res == ERROR_LOGICAL) {
-							print_error_message(INVALID_DATA_MESSAGE);
-						}
-					} else if (message.messageType == GetMail) {
-
-						get_mail_id_from_message(&message, &mailID, GetMail);
-						if (mailID == ERROR_LOGICAL) {
-							print_error_message(INVALID_DATA_MESSAGE);
-							break;
-						}
-
-						mail = get_mail_by_id(curUser, mailID, &mailIndex);
-						if (mail == NULL) {
-							send_empty_message(clientSocket, InvalidID);
-						} else {
-							res = send_message_from_mail(clientSocket, mail);
-							if (res == ERROR) {
-								print_error();
-								break;
-							} else if (res == ERROR_LOGICAL) {
-								print_error_message(INVALID_DATA_MESSAGE);
-							}
-						}
-					} else if (message.messageType == GetAttachment) {
-
-						get_mail_attachment_id_from_message(&message, &mailID, &attachmentID);
-						if (mailID == ERROR_LOGICAL) {
-							print_error_message(INVALID_DATA_MESSAGE);
-							break;
-						}
-
-						attachment = get_attachment_by_id(curUser, mailID,
-								attachmentID);
-						if (attachment == NULL) {
-							send_empty_message(clientSocket, InvalidID);
-						} else {
-							res = send_message_from_attachment(clientSocket,
-									attachment);
-							if (res == ERROR) {
-								print_error();
-								break;
-							} else if (res == ERROR_LOGICAL) {
-								print_error_message(INVALID_DATA_MESSAGE);
-							}
-						}
-					} else if (message.messageType == DeleteMail) {
-						get_mail_id_from_message(&message, &mailID, DeleteMail);
-						if (mailID == ERROR_LOGICAL) {
-							print_error_message(INVALID_DATA_MESSAGE);
-							break;
-						}
-
-						res = delete_mail(curUser, mailID);
-						if (res == ERROR_INVALID_ID) {
-							send_empty_message(clientSocket, InvalidID);
-						} else if ((res != 0) || (send_empty_message(clientSocket,
-								DeleteApprove) != 0)) {
-							print_error();
-						}
-					} else if (message.messageType == Compose) {
-						res = prepare_mail_from_compose_message(&message, &mail);
-						if (res != 0) {
-							print_error();
-							break;
-						}
-
-						res = add_mail_to_server(users, usersAmount, curUser->name, mail);
-					} else {
-						res = send_empty_message(clientSocket, InvalidCommand);
-						if (res == ERROR) {
-							print_error();
-							break;
-						}
-					}
-
-					free_message(&message);
-				} while (1);
-			}
-
-			curUser = NULL;
-			free_message(&message);
-			close(clientSocket);
+			continue;
 		}
+
+		/* Sending welcome message */
+		res = send_message_from_string(clientSocket, WELLCOME_MESSAGE);
+		res = handle_return_value(res);
+		if (res == 0) {
+			do {
+				/* Waiting for client request */
+				res = recv_message(clientSocket, &message);
+				res = handle_return_value(res);
+				if (res == ERROR) {
+					break;
+				}
+
+				if (message.messageType == Quit) {
+					break;
+				} else if (curUser == NULL) {
+					curUser = check_credentials_message(users, usersAmount,
+							&message);
+
+					if (curUser == NULL) {
+						res = send_credentials_deny_message(clientSocket);
+					} else {
+						res = send_credentials_approve_message(clientSocket);
+						/* TODO: delete this */
+						/*create_stub(curUser);*/
+					}
+
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
+					}
+				} else if (message.messageType == ShowInbox) {
+					prepare_client_ids(curUser);
+					res = send_message_from_inbox_content(clientSocket,
+							curUser->mails, curUser->mailsUsed);
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
+					}
+				} else if (message.messageType == GetMail) {
+
+					prepare_mail_id_from_message(&message, &mailID, GetMail);
+					if (mailID == ERROR_LOGICAL) {
+						print_error_message(INVALID_DATA_MESSAGE);
+						break;
+					}
+
+					mail = get_mail_by_id(curUser, mailID);
+					if (mail == NULL) {
+						send_invalid_id_message(clientSocket);
+					} else {
+						res = send_message_from_mail(clientSocket, mail);
+						res = handle_return_value(res);
+						if (res == ERROR) {
+							break;
+						}
+					}
+				} else if (message.messageType == GetAttachment) {
+
+					prepare_mail_attachment_id_from_message(&message, &mailID,
+							&attachmentID);
+					if (mailID == ERROR_LOGICAL) {
+						print_error_message(INVALID_DATA_MESSAGE);
+						break;
+					}
+
+					attachment = get_attachment_by_id(curUser, mailID,
+							attachmentID);
+					if (attachment == NULL) {
+						send_invalid_id_message(clientSocket);
+					} else {
+						res = send_message_from_attachment(clientSocket,
+								attachment);
+						res = handle_return_value(res);
+						if (res == ERROR) {
+							break;
+						}
+					}
+				} else if (message.messageType == DeleteMail) {
+					prepare_mail_id_from_message(&message, &mailID, DeleteMail);
+					if (mailID == ERROR_LOGICAL) {
+						print_error_message(INVALID_DATA_MESSAGE);
+						break;
+					}
+
+					res = delete_mail(curUser, mailID);
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
+					}
+					if (res == ERROR_INVALID_ID) {
+						send_invalid_id_message(clientSocket);
+					} else {
+						res = send_delete_approve_message(clientSocket);
+						res = handle_return_value(res);
+						if (res == ERROR) {
+							break;
+						}
+					}
+				} else if (message.messageType == Compose) {
+					res = prepare_mail_from_compose_message(&message, &mail);
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
+					}
+
+					res = add_mail_to_server(users, usersAmount, curUser->name,
+							mail);
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
+					}
+
+					res = send_send_approve_message(clientSocket);
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
+					}
+				} else {
+					res = send_invalid_command_message(clientSocket);
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
+					}
+				}
+
+				free_message(&message);
+			} while (1);
+		}
+
+		curUser = NULL;
+		free_message(&message);
+		close(clientSocket);
 	} while (1);
 
 	/* Releasing resources */
