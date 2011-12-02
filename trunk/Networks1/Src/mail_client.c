@@ -29,6 +29,7 @@
 #include "common.h"
 #include "protocol.h"
 
+/* Save a file from an attachment struct to a certain path */
 int save_file_from_attachment(Attachment *attachment, char *savePath) {
 
 	FILE *file;
@@ -63,6 +64,7 @@ int save_file_from_attachment(Attachment *attachment, char *savePath) {
 	return (0);
 }
 
+/* Print inbox headers data to stdin */
 void print_inbox_info(int mailAmount, Mail *mails) {
 
 	int i;
@@ -73,6 +75,7 @@ void print_inbox_info(int mailAmount, Mail *mails) {
 	}
 }
 
+/* Print a mail struct data to the stdin */
 void print_mail(Mail *mail) {
 
 	int i;
@@ -97,6 +100,7 @@ void print_mail(Mail *mail) {
 	printf("\nText: %s\n", mail->body);
 }
 
+/* count the number of occurrences of chr is str */
 int count_occurrences(char *str, char chr) {
 
 	int i, occ = 0, length = strlen(str);
@@ -110,6 +114,10 @@ int count_occurrences(char *str, char chr) {
 	return occ;
 }
 
+/* Inserting a file data to an attachment */
+/* The whole file is inserted to an attachment because the use of file system */
+/* is a part of the client implementation, and the the protocol which only recognize */
+/* the attachment data structure */
 int insert_file_data_to_attachment(Attachment *attachment, char* path) {
 
 	char* temp;
@@ -151,7 +159,10 @@ int insert_file_data_to_attachment(Attachment *attachment, char* path) {
 	return (0);
 }
 
-int prepare_mail_from_compose_input(Mail *mail, char *curUser, char *tempRecipients, char *tempSubject, char *tempAttachments, char *tempText) {
+/* Inserting the inputed (valid) compose input to a mail struct  including attachments files data */
+int prepare_mail_from_compose_input(Mail *mail, char *curUser,
+		char *tempRecipients, char *tempSubject, char *tempAttachments,
+		char *tempText) {
 
 	int i, res;
 	char* temp;
@@ -236,7 +247,6 @@ int prepare_mail_from_compose_input(Mail *mail, char *curUser, char *tempRecipie
 	return (0);
 }
 
-/* TODO: make sure whenever error this returns -1 */
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
@@ -249,7 +259,7 @@ int main(int argc, char** argv) {
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
 	char input[MAX_INPUT_LEN + 1];
-	int mailAmount;
+	unsigned short mailAmount;
 	Mail *mails, mail;
 	char attachmentPath[MAX_PATH_LEN + 1];
 	int isLoggedIn = 0;
@@ -278,12 +288,11 @@ int main(int argc, char** argv) {
 	if (res != 0) {
 		fprintf(stderr, "%s\n", gai_strerror(res));
 		print_error_message(CLIENT_USAGE_MESSAGE);
-		return ERROR;
+		return (ERROR);
 	}
 
-	clientSocket = socket(PF_INET, SOCK_STREAM, 0);
-
 	/* Connect to server */
+	clientSocket = socket(PF_INET, SOCK_STREAM, 0);
 	res = connect(clientSocket, servinfo->ai_addr, servinfo->ai_addrlen);
 	if (res == ERROR) {
 		print_error();
@@ -294,17 +303,17 @@ int main(int argc, char** argv) {
 	/* Receiving welcome message */
 	res = recv_string_from_message(clientSocket, &stringMessage);
 	res = handle_return_value(res);
-
 	if (res == ERROR) {
 		close(clientSocket);
 		freeaddrinfo(servinfo);
-		return ERROR;
+		return (ERROR);
 	} else {
 		printf("%s\n", stringMessage);
 		free(stringMessage);
 	}
 
 	do {
+		res = 0;
 		fgets(input, MAX_INPUT_LEN, stdin);
 		if (strcmp(input, QUIT_MESSAGE) == 0) {
 			res = send_quit_message(clientSocket);
@@ -377,7 +386,8 @@ int main(int argc, char** argv) {
 			}
 		} else if (sscanf(input, GET_ATTACHMENT "%hu %hu \"%[^\"]\"", &mailID,
 				&tempAttachmentID, attachmentPath) == 3) {
-			attachmentID = (unsigned char)(tempAttachmentID & 0xFF);
+			/* Converting to unsigned char while zeroing the non important bits */
+			attachmentID = (unsigned char)tempAttachmentID;
 			res = send_get_attachment_message(clientSocket, mailID,
 					attachmentID);
 			res = handle_return_value(res);
@@ -392,6 +402,7 @@ int main(int argc, char** argv) {
 				break;
 			} else if (res == ERROR_INVALID_ID) {
 				free_mail(&mail);
+				res = 0;
 				continue;
 			} else {
 				res = save_file_from_attachment(&attachment, attachmentPath);
@@ -470,6 +481,6 @@ int main(int argc, char** argv) {
 	close(clientSocket);
 	freeaddrinfo(servinfo);
 
-	return (0);
+	return (res);
 }
 
