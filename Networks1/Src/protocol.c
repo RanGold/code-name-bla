@@ -256,6 +256,25 @@ int prepare_message_from_credentials(char *userName, char *password,
 	}
 }
 
+int send_empty_message(int socket, MessageType type) {
+
+	Message message;
+	int res;
+
+	memset(&message, 0, sizeof(Message));
+	message.messageType = type;
+	message.messageSize = ZeroSize;
+	message.size = 0;
+
+	res = send_message(socket, &message);
+	free_message(&message);
+	return (res);
+}
+
+int send_quit_message(int socket) {
+	return (send_empty_message(socket, Quit));
+}
+
 int send_message_from_credentials(int socket, char* userName, char* password) {
 
 	Message message;
@@ -293,6 +312,14 @@ int prepare_credentials_from_message(Message* message, char* userName, char* pas
 	return (0);
 }
 
+int send_credentials_deny_message(int socket) {
+	return (send_empty_message(socket, CredentialsDeny));
+}
+
+int send_credentials_approve_message(int socket) {
+	return (send_empty_message(socket, CredentialsApprove));
+}
+
 int recv_credentials_result(int socket, int *isLoggedIn) {
 
 	int res;
@@ -300,28 +327,15 @@ int recv_credentials_result(int socket, int *isLoggedIn) {
 
 	res = recv_message(socket, &message);
 	if (res == 0) {
-		if (message.messageType == CredentialsAccept) {
+		if (message.messageType == CredentialsApprove) {
 			*isLoggedIn = 1;
 		} else if (message.messageType == CredentialsDeny) {
 			*isLoggedIn = 0;
+		} else {
+			res = ERROR_LOGICAL;
 		}
 	}
 
-	free_message(&message);
-	return (res);
-}
-
-int send_empty_message(int socket, MessageType type) {
-
-	Message message;
-	int res;
-
-	memset(&message, 0, sizeof(Message));
-	message.messageType = type;
-	message.messageSize = ZeroSize;
-	message.size = 0;
-
-	res = send_message(socket, &message);
 	free_message(&message);
 	return (res);
 }
@@ -388,8 +402,12 @@ void free_mails(int mailAmount, Mail *mails) {
 int calculate_mail_header_size(Mail *mail) {
 	int size = 0;
 
-	size += strlen(mail->sender) + 1;
-	size += strlen(mail->subject) + 1;
+	if (mail->sender != NULL) {
+		size += strlen(mail->sender) + 1;
+	}
+	if (mail->subject != NULL) {
+		size += strlen(mail->subject) + 1;
+	}
 	size += sizeof(mail->numAttachments);
 
 	return (size);
@@ -401,7 +419,7 @@ int calculate_inbox_info_size(Mail **mails, int mailAmount){
 
 	for (i = 0; i < mailAmount; i++) {
 		if (mails[i] != NULL){
-			messageSize += sizeof(mails[i]->id);
+			messageSize += sizeof(mails[i]->clientId);
 			messageSize += calculate_mail_header_size(mails[i]);
 		}
 	}
@@ -456,13 +474,17 @@ int prepare_message_from_inbox_content(Mail **mails, int mailAmount, Message *me
 	for (i = 0; i < mailAmount; i++) {
 		if (mails[i] != NULL) {
 
-			memcpy(message->data + offset, &(mails[i]->id), sizeof(mails[i]->id));
-			offset += sizeof(mails[i]->id);
+			memcpy(message->data + offset, &(mails[i]->clientId), sizeof(mails[i]->clientId));
+			offset += sizeof(mails[i]->clientId);
 			insert_mail_header_to_buffer(message->data, &offset, mails[i]);
 		}
 	}
 
 	return (0);
+}
+
+int send_show_inbox_message(int socket) {
+	return (send_empty_message(socket, ShowInbox));
 }
 
 int send_message_from_inbox_content(int socket, Mail **mails, int mailAmount) {
@@ -531,8 +553,8 @@ int prepare_inbox_content_from_message(Message *message, Mail **mails, int *mail
 		memset((*mails) + i, 0, sizeof(Mail));
 
 		/* Prepare id */
-		memcpy(&((*mails)[i].id), message->data + offset, sizeof((*mails)[i].id));
-		offset += sizeof((*mails)[i].id);
+		memcpy(&((*mails)[i].clientId), message->data + offset, sizeof((*mails)[i].clientId));
+		offset += sizeof((*mails)[i].clientId);
 
 		if (prepare_mail_header_from_message(message, (*mails) + i, &offset) != 0) {
 			free_mails(*mailAmount, (*mails));
@@ -603,7 +625,7 @@ int send_get_mail_message(int socket, unsigned short mailID) {
 	return (res);
 }
 
-void get_mail_id_from_message(Message *message, unsigned short *mailID, MessageType messageType) {
+void prepare_mail_id_from_message(Message *message, unsigned short *mailID, MessageType messageType) {
 
 	if (message->messageType != messageType || message->messageSize != TwoBytes) {
 		*mailID = ERROR_LOGICAL;
@@ -662,6 +684,10 @@ int prepare_message_from_mail(Mail *mail, Message *message) {
 	return (0);
 }
 
+int send_invalid_id_message(int socket) {
+	return (send_empty_message(socket, InvalidID));
+}
+
 int send_message_from_mail(int socket, Mail *mail) {
 
 	int res;
@@ -690,41 +716,45 @@ int prepare_mail_from_message(Message *message, Mail *mail, int *offset) {
 	}
 
 	/* Preparing attachments names */
-	mail->attachments = calloc(mail->numAttachments, sizeof(Attachment));
-	if (mail->attachments == NULL) {
-		free_mail(mail);
-		return (ERROR);
-	}
-	for (i = 0; i < mail->numAttachments; i++) {
-		attachmentNameLen = strlen((char*) (message->data + *offset)) + 1;
-		mail->attachments[i].fileName = calloc(attachmentNameLen, 1);
-		if (mail->attachments[i].fileName == NULL) {
+	if (mail->numAttachments > 0) {
+		mail->attachments = calloc(mail->numAttachments, sizeof(Attachment));
+		if (mail->attachments == NULL) {
 			free_mail(mail);
 			return (ERROR);
 		}
-		memcpy(mail->attachments[i].fileName, message->data + *offset,
-				attachmentNameLen);
-		*offset += attachmentNameLen;
+		for (i = 0; i < mail->numAttachments; i++) {
+			attachmentNameLen = strlen((char*) (message->data + *offset)) + 1;
+			mail->attachments[i].fileName = calloc(attachmentNameLen, 1);
+			if (mail->attachments[i].fileName == NULL) {
+				free_mail(mail);
+				return (ERROR);
+			}
+			memcpy(mail->attachments[i].fileName, message->data + *offset,
+					attachmentNameLen);
+			*offset += attachmentNameLen;
+		}
 	}
 
 	/* Preparing recipients names */
 	memcpy(&(mail->numRecipients), message->data + *offset,
 			sizeof(mail->numRecipients));
 	*offset += sizeof(mail->numRecipients);
-	mail->recipients = calloc(mail->numRecipients, sizeof(char*));
-	if (mail->recipients == NULL) {
-		free_mail(mail);
-		return (ERROR);
-	}
-	for (i = 0; i < mail->numRecipients; i++) {
-		recipientLen = strlen((char*) (message->data + *offset)) + 1;
-		mail->recipients[i] = calloc(recipientLen, 1);
-		if (mail->recipients[i] == NULL) {
+	if (mail->numRecipients > 0) {
+		mail->recipients = calloc(mail->numRecipients, sizeof(char*));
+		if (mail->recipients == NULL) {
 			free_mail(mail);
 			return (ERROR);
 		}
-		memcpy(mail->recipients[i], message->data + *offset, recipientLen);
-		offset += recipientLen;
+		for (i = 0; i < mail->numRecipients; i++) {
+			recipientLen = strlen((char*) (message->data + *offset)) + 1;
+			mail->recipients[i] = calloc(recipientLen, 1);
+			if (mail->recipients[i] == NULL) {
+				free_mail(mail);
+				return (ERROR);
+			}
+			memcpy(mail->recipients[i], message->data + *offset, recipientLen);
+			*offset += recipientLen;
+		}
 	}
 
 	/* Prepare body */
@@ -777,7 +807,7 @@ int send_get_attachment_message(int socket, unsigned short mailID,
 	return (res);
 }
 
-void get_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachmentID) {
+void prepare_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachmentID) {
 
 	if ((message->messageType != GetAttachment)
 			|| (message->messageSize != ThreeBytes)) {
@@ -868,6 +898,10 @@ int send_delete_mail_message(int socket, unsigned short mailID) {
 	res = send_mail_id_message(socket, mailID, &message, DeleteMail);
 	free_message(&message);
 	return (res);
+}
+
+int send_delete_approve_message(int socket) {
+	return (send_empty_message(socket, DeleteApprove));
 }
 
 int recv_delete_result(int socket) {
@@ -996,4 +1030,26 @@ int prepare_mail_from_compose_message(Message *message, Mail **mail) {
 
 	free_message(message);
 	return (0);
+}
+
+int send_send_approve_message(int socket) {
+	return(send_empty_message(socket, SendApprove));
+}
+
+int recv_send_result(int socket) {
+
+	int res;
+	Message message;
+
+	res = recv_typed_message(socket, &message, SendApprove);
+	if (res != 0) {
+		return (res);
+	} else {
+		free_message(&message);
+		return (0);
+	}
+}
+
+int send_invalid_command_message(int socket) {
+	return (send_empty_message(socket, InvalidCommand));
 }

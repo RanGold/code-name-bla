@@ -11,6 +11,7 @@
 /* Errors Messages */
 #define INVALID_DATA_MESSAGE "Invalid data received"
 #define SOCKET_CLOSED_MESSAGE "Socket closed"
+#define INVALID_ID_MESSAGE "Invalid id requested"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,5 +22,7 @@
 void print_error();
 
 void print_error_message(char *message);
+
+int handle_return_value(int res);
 
 FILE* get_valid_file(char* fileName, char* mode);
