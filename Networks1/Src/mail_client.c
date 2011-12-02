@@ -123,7 +123,8 @@ int insert_file_data_to_attachment(Attachment *attachment, char* path) {
 	memset(attachment, 0 , sizeof(Attachment));
 
 	/* Preparing size */
-	attachment->size = fseek(file, 0, SEEK_END);
+	fseek(file, 0, SEEK_END);
+	attachment->size = ftell(file);
 	fseek(file, 0, SEEK_SET);
 
 	/* Preparing file name */
@@ -206,7 +207,7 @@ int prepare_mail_from_compose_input(Mail *mail, char *curUser, char *tempRecipie
 	}
 
 	/* Preparing attachments */
-	mail->numAttachments = count_occurrences(tempRecipients, '"') / 2;
+	mail->numAttachments = count_occurrences(tempAttachments, '"') / 2;
 
 	if (mail->numAttachments > 0) {
 		mail->attachments = (Attachment*) calloc(mail->numAttachments,
@@ -229,7 +230,7 @@ int prepare_mail_from_compose_input(Mail *mail, char *curUser, char *tempRecipie
 				return (ERROR);
 			}
 
-			temp = strtok(NULL, " ,");
+			temp = strtok(NULL, "\",");
 		}
 	}
 	return (0);
@@ -437,7 +438,8 @@ int main(int argc, char** argv) {
 			if (res == 0) {
 				print_error_message(COMPOSE_USAGE_MESSAGE);
 			} else {
-				res = prepare_mail_from_compose_input(&mail, userName, tempRecipients, tempSubject, tempAttachments, tempText);
+				res = prepare_mail_from_compose_input(&mail, userName, tempRecipients,
+						tempSubject, tempAttachments, tempText);
 				res = handle_return_value(res);
 				if (res == ERROR) {
 					break;
