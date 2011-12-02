@@ -247,7 +247,7 @@ int initiallize_listen_socket(int *listenSocket, short port) {
 
 int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *mail) {
 
-	int i, j;
+	int i, j, k;
 
 	/* Setting sender and freeing the current empty sender */
 	free(mail->sender);
@@ -266,9 +266,13 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 				/* Checking if the mail array should be enlarged */
 				if (users[i].mailsUsed == users[i].mailArraySize) {
 					users[i].mailArraySize *= 2;
-					users[i].mails = realloc(users[i].mails, users[i].mailArraySize);
+					users[i].mails = realloc(users[i].mails, users[i].mailArraySize * sizeof(Mail*));
 					if (users[i].mails == NULL) {
 						return(ERROR);
+					}
+					/* Initializing new mails */
+					for (k = users[i].mailArraySize / 2; k < users[i].mailArraySize; k++) {
+						users[i].mails[k] = NULL;
 					}
 				}
 

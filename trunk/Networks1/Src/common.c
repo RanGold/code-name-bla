@@ -30,23 +30,36 @@ int handle_return_value(int res) {
 
 int get_absolute_path(char* relPath, char** absPath) {
 
-	wordexp_t exp_result;
-	wordexp(relPath, &exp_result, 0);
-	*absPath = calloc(strlen(exp_result.we_wordv[0]) + 1, 1);
+	wordexp_t expansionResult;
+	int expLength, i;
+
+	wordexp(relPath, &expansionResult, 0);
+	if (expansionResult.we_wordc == 0) {
+		return (ERROR);
+	}
+	expLength = 0;
+	for (i = 0; i < expansionResult.we_wordc; i++) {
+		expLength += strlen(expansionResult.we_wordv[i]);
+	}
+	*absPath = calloc(expLength + expansionResult.we_wordc, 1);
 	if (*absPath == NULL) {
 		return (ERROR);
 	}
-	strncpy(*absPath, exp_result.we_wordv[0], strlen(exp_result.we_wordv[0]));
-	wordfree(&exp_result);
+
+	strncpy(*absPath, expansionResult.we_wordv[0], strlen(expansionResult.we_wordv[0]));
+	for (i = 1; i < expansionResult.we_wordc; i++) {
+		strcat(*absPath, " ");
+		strcat(*absPath, expansionResult.we_wordv[i]);
+	}
+	wordfree(&expansionResult);
 
 	return (0);
 }
 
-/* Gets a file for reading */
 FILE* get_valid_file(char* fileName, char* mode) {
 
 	FILE* file;
-	char* absPath;
+	char* absPath = NULL;
 	int res;
 
 	/* Getting absolute path */
@@ -59,6 +72,7 @@ FILE* get_valid_file(char* fileName, char* mode) {
 	file = fopen(absPath, mode);
 	if (file == NULL) {
 		perror(absPath);
+		free(absPath);
 		return (NULL);
 	}
 

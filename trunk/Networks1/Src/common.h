@@ -19,10 +19,14 @@
 #include <errno.h>
 #include <wordexp.h>
 
+/* Print the current, indicated by errno, message */
 void print_error();
 
+/* Print a specific error message */
 void print_error_message(char *message);
 
+/* Handling different return values including errors */
 int handle_return_value(int res);
 
+/* Gets a file for whatever requested mode */
 FILE* get_valid_file(char* fileName, char* mode);
