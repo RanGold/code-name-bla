@@ -285,7 +285,6 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 	return (0);
 }
 
-/* TODO: make sure whenever error this returns -1 */
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
@@ -322,7 +321,6 @@ int main(int argc, char** argv) {
 		return (ERROR);
 	}
 
-	memset(&message, 0, sizeof(Message));
 	do {
 
 		/* Prepare structure for client address */
@@ -339,6 +337,7 @@ int main(int argc, char** argv) {
 		res = send_message_from_string(clientSocket, WELLCOME_MESSAGE);
 		res = handle_return_value(res);
 		if (res == 0) {
+			memset(&message, 0, sizeof(Message));
 			do {
 				/* Waiting for client request */
 				res = recv_message(clientSocket, &message);
@@ -383,13 +382,14 @@ int main(int argc, char** argv) {
 
 					mail = get_mail_by_id(curUser, mailID);
 					if (mail == NULL) {
-						send_invalid_id_message(clientSocket);
+						res = send_invalid_id_message(clientSocket);
 					} else {
 						res = send_message_from_mail(clientSocket, mail);
-						res = handle_return_value(res);
-						if (res == ERROR) {
-							break;
-						}
+					}
+
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
 					}
 				} else if (message.messageType == GetAttachment) {
 
@@ -403,14 +403,15 @@ int main(int argc, char** argv) {
 					attachment = get_attachment_by_id(curUser, mailID,
 							attachmentID);
 					if (attachment == NULL) {
-						send_invalid_id_message(clientSocket);
+						res = send_invalid_id_message(clientSocket);
 					} else {
 						res = send_message_from_attachment(clientSocket,
 								attachment);
-						res = handle_return_value(res);
-						if (res == ERROR) {
-							break;
-						}
+					}
+
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
 					}
 				} else if (message.messageType == DeleteMail) {
 					prepare_mail_id_from_message(&message, &mailID, DeleteMail);
@@ -425,13 +426,14 @@ int main(int argc, char** argv) {
 						break;
 					}
 					if (res == ERROR_INVALID_ID) {
-						send_invalid_id_message(clientSocket);
+						res = send_invalid_id_message(clientSocket);
 					} else {
 						res = send_delete_approve_message(clientSocket);
-						res = handle_return_value(res);
-						if (res == ERROR) {
-							break;
-						}
+					}
+
+					res = handle_return_value(res);
+					if (res == ERROR) {
+						break;
 					}
 				} else if (message.messageType == Compose) {
 					res = prepare_mail_from_compose_message(&message, &mail);
@@ -474,5 +476,5 @@ int main(int argc, char** argv) {
 	close(listenSocket);
 	free_message(&message);
 
-	return (0);
+	return (res);
 }

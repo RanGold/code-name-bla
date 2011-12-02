@@ -55,13 +55,13 @@ void free_message(Message *message) {
 int send_message(int targetSocket, Message *message) {
 
 	int bytesToSend;
-	int res;
+	int res, netMessageSize;
 	unsigned char header;
 	unsigned int len = 0;
 
 	/* Sending header */
 	bytesToSend = 1;
-	header = (unsigned char)(message->messageType) | (((unsigned char)(message->messageSize))<<5);
+	header = (((unsigned char)(message->messageType)) | (((unsigned char)(message->messageSize))<<5));
 	res = send_all(targetSocket, &header, &bytesToSend);
 
 	/* In case of an error we stop before sending the data */
@@ -75,7 +75,8 @@ int send_message(int targetSocket, Message *message) {
 	/* Sending data size (if needed) */
 	if (message->messageSize == VariedSize) {
 		bytesToSend = sizeof(int);
-		res = send_all(targetSocket, (unsigned char*)&(message->size), &bytesToSend);
+		netMessageSize = htonl(message->size);
+		res = send_all(targetSocket, (unsigned char*)&(netMessageSize), &bytesToSend);
 		if (res == ERROR) {
 			free_message(message);
 			return (ERROR);
@@ -102,7 +103,7 @@ int send_message(int targetSocket, Message *message) {
 
 int recv_message(int sourceSocket, Message *message) {
 
-	int bytesToRecv;
+	int bytesToRecv, netMessageSize;
 	int res;
 	unsigned char header;
 	unsigned int len = 0;
@@ -131,7 +132,8 @@ int recv_message(int sourceSocket, Message *message) {
 		bytesToRecv = message->size = 3;
 	} else if (message->messageSize == VariedSize) {
 		bytesToRecv = sizeof(int);
-		res = recv_all(sourceSocket, (unsigned char*)&(message->size), &bytesToRecv);
+		res = recv_all(sourceSocket, (unsigned char*)&(netMessageSize), &bytesToRecv);
+		message->size = ntohl(netMessageSize);
 		if (res != 0) {
 			return (res);
 		}
@@ -438,9 +440,9 @@ void insert_mail_header_to_buffer(unsigned char *buffer, int *offset, Mail *mail
 	*offset += sizeof(mail->numAttachments);
 }
 
-int calculate_non_empty_mail_amount(Mail **mails, int mailAmount) {
+unsigned short calculate_non_empty_mail_amount(Mail **mails, int mailAmount) {
 
-	int i, amount = 0;
+	unsigned short i, amount = 0;
 
 	for (i = 0; i < mailAmount; i++) {
 		if (mails[i] != NULL) {
@@ -451,16 +453,17 @@ int calculate_non_empty_mail_amount(Mail **mails, int mailAmount) {
 	return (amount);
 }
 
-int prepare_message_from_inbox_content(Mail **mails, int mailAmount, Message *message) {
+int prepare_message_from_inbox_content(Mail **mails, unsigned short mailAmount, Message *message) {
 
 	int i;
 	int offset = 0;
-	int nonEmptyMails = calculate_non_empty_mail_amount(mails, mailAmount);
+	unsigned short netNonEmptyMails, netClientID, nonEmptyMails;
 
+	nonEmptyMails = calculate_non_empty_mail_amount(mails, mailAmount);
 	message->messageType = InboxContent;
 
 	/* Calculating message size */
-	message->size = calculate_inbox_info_size(mails, mailAmount) + sizeof(mailAmount);
+	message->size = calculate_inbox_info_size(mails, mailAmount) + sizeof(nonEmptyMails);
 	message->messageSize = VariedSize;
 
 	message->data = (unsigned char*)calloc(message->size, 1);
@@ -468,13 +471,15 @@ int prepare_message_from_inbox_content(Mail **mails, int mailAmount, Message *me
 		return (ERROR);
 	}
 
-	memcpy(message->data + offset, &nonEmptyMails, sizeof(nonEmptyMails));
+	netNonEmptyMails = htons(nonEmptyMails);
+	memcpy(message->data + offset, &netNonEmptyMails, sizeof(netNonEmptyMails));
 	offset += sizeof(mailAmount);
 
 	for (i = 0; i < mailAmount; i++) {
 		if (mails[i] != NULL) {
 
-			memcpy(message->data + offset, &(mails[i]->clientId), sizeof(mails[i]->clientId));
+			netClientID = htons(mails[i]->clientId);
+			memcpy(message->data + offset, &netClientID, sizeof(netClientID));
 			offset += sizeof(mails[i]->clientId);
 			insert_mail_header_to_buffer(message->data, &offset, mails[i]);
 		}
@@ -487,7 +492,7 @@ int send_show_inbox_message(int socket) {
 	return (send_empty_message(socket, ShowInbox));
 }
 
-int send_message_from_inbox_content(int socket, Mail **mails, int mailAmount) {
+int send_message_from_inbox_content(int socket, Mail **mails, unsigned short mailAmount) {
 
 	Message message;
 	int res;
@@ -505,6 +510,7 @@ int send_message_from_inbox_content(int socket, Mail **mails, int mailAmount) {
 }
 
 int prepare_mail_header_from_message(Message *message, Mail *mail, int *offset) {
+
 	int senderLength, subjectLength;
 
 	/* Prepare sender */
@@ -533,13 +539,15 @@ int prepare_mail_header_from_message(Message *message, Mail *mail, int *offset) 
 	return (0);
 }
 
-int prepare_inbox_content_from_message(Message *message, Mail **mails, int *mailAmount) {
+int prepare_inbox_content_from_message(Message *message, Mail **mails, unsigned short *mailAmount) {
 
 	int offset = 0;
 	int i;
+	unsigned short netMailAmount, netClientID;
 
 	/* Getting mail amount */
-	memcpy(mailAmount, message->data + offset, sizeof(*mailAmount));
+	memcpy(&netMailAmount, message->data + offset, sizeof(netMailAmount));
+	*mailAmount = ntohs(netMailAmount);
 	offset += sizeof(*mailAmount);
 
 	if (*mailAmount > 0) {
@@ -553,8 +561,9 @@ int prepare_inbox_content_from_message(Message *message, Mail **mails, int *mail
 		memset((*mails) + i, 0, sizeof(Mail));
 
 		/* Prepare id */
-		memcpy(&((*mails)[i].clientId), message->data + offset, sizeof((*mails)[i].clientId));
+		memcpy(&netClientID, message->data + offset, sizeof(netClientID));
 		offset += sizeof((*mails)[i].clientId);
+		(*mails)[i].clientId = ntohs(netClientID);
 
 		if (prepare_mail_header_from_message(message, (*mails) + i, &offset) != 0) {
 			free_mails(*mailAmount, (*mails));
@@ -566,7 +575,7 @@ int prepare_inbox_content_from_message(Message *message, Mail **mails, int *mail
 	return (0);
 }
 
-int recv_inbox_content_from_message(int socket, Mail **mails, int *mailAmount) {
+int recv_inbox_content_from_message(int socket, Mail **mails, unsigned short *mailAmount) {
 
 	int res;
 	Message message;
@@ -602,15 +611,18 @@ int calculate_mail_size(Mail *mail) {
 
 int send_mail_id_message(int clientSocket, unsigned short mailID, Message* message, MessageType messageType) {
 
+	unsigned short netMailID;
+
 	message->messageType = messageType;
-	message->size = sizeof(mailID);
+	message->size = sizeof(netMailID);
 	message->messageSize = TwoBytes;
 
 	message->data = calloc(message->size, 1);
 	if (message->data == NULL) {
 		return (ERROR);
 	}
-	memcpy(message->data, &mailID, message->size);
+	netMailID = htons(mailID);
+	memcpy(message->data, &netMailID, message->size);
 
 	return (send_message(clientSocket, message));
 }
@@ -627,10 +639,13 @@ int send_get_mail_message(int socket, unsigned short mailID) {
 
 void prepare_mail_id_from_message(Message *message, unsigned short *mailID, MessageType messageType) {
 
+	unsigned short netMailID;
+
 	if (message->messageType != messageType || message->messageSize != TwoBytes) {
 		*mailID = ERROR_LOGICAL;
 	} else {
-		memcpy(mailID, message->data, message->size);
+		memcpy(&netMailID, message->data, message->size);
+		*mailID = ntohs(netMailID);
 	}
 
 	free_message(message);
@@ -790,6 +805,7 @@ int send_get_attachment_message(int socket, unsigned short mailID,
 
 	int res;
 	Message message;
+	unsigned short netMailID;
 
 	message.messageType = GetAttachment;
 	message.messageSize = ThreeBytes;
@@ -799,8 +815,9 @@ int send_get_attachment_message(int socket, unsigned short mailID,
 	if (message.data == NULL) {
 		return (ERROR);
 	}
-	memcpy(message.data, &mailID, sizeof(mailID));
-	memcpy(message.data + sizeof(mailID), &attachmentID, 1);
+	netMailID = htons(mailID);
+	memcpy(message.data, &netMailID, sizeof(netMailID));
+	memcpy(message.data + sizeof(netMailID), &attachmentID, 1);
 
 	res = send_message(socket, &message);
 	free_message(&message);
@@ -809,12 +826,15 @@ int send_get_attachment_message(int socket, unsigned short mailID,
 
 void prepare_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachmentID) {
 
+	unsigned short netMailID;
+
 	if ((message->messageType != GetAttachment)
 			|| (message->messageSize != ThreeBytes)) {
 		*mailID = ERROR_LOGICAL;
 	} else {
-		memcpy(mailID, message->data, sizeof(*mailID));
-		memcpy(attachmentID, message->data + sizeof(*mailID), 1);
+		memcpy(&netMailID, message->data, sizeof(netMailID));
+		*mailID = ntohs(netMailID);
+		memcpy(attachmentID, message->data + sizeof(netMailID), 1);
 	}
 
 	free_message(message);
@@ -932,13 +952,14 @@ int calculate_full_mail_size(Mail *mail) {
 
 void insert_mail_attachments_to_buffer(unsigned char *buffer, int *offset, Mail *mail) {
 
-	int i;
+	int i, netAttachmentSize;
 
 	/* Inserting attachments data */
 	for (i = 0; i < mail->numAttachments; i++) {
-		memcpy(buffer + *offset, &(mail->attachments[i].size),
-				sizeof(mail->attachments[i].size));
-		*offset += sizeof(mail->attachments[i].size);
+		netAttachmentSize = htonl(mail->attachments[i].size);
+		memcpy(buffer + *offset, &(netAttachmentSize),
+				sizeof(netAttachmentSize));
+		*offset += sizeof(netAttachmentSize);
 
 		memcpy(buffer + *offset, mail->attachments[i].data,
 						mail->attachments[i].size);
@@ -985,13 +1006,14 @@ int send_compose_message_from_mail(int socket, Mail *mail) {
 
 int prepare_mail_attachments_from_message(Message *message, Mail *mail, int *offset) {
 
-	int i;
+	int i, netAttachmentSize;
 
 	/* Getting attachments data */
 	for (i = 0; i < mail->numAttachments; i++) {
-		memcpy(&(mail->attachments[i].size), message->data + *offset,
-				sizeof(mail->attachments[i].size));
-		*offset += sizeof(mail->attachments[i].size);
+		memcpy(&(netAttachmentSize), message->data + *offset,
+				sizeof(netAttachmentSize));
+		*offset += sizeof(netAttachmentSize);
+		mail->attachments[i].size = ntohl(netAttachmentSize);
 
 		mail->attachments[i].data = calloc(mail->attachments[i].size, 1);
 		if (mail->attachments[i].data == NULL) {

@@ -105,10 +105,10 @@ void free_mails(int mailAmount, Mail *mails);
 int send_show_inbox_message(int socket);
 
 /* Send a message containing the data need to display the inbox content */
-int send_message_from_inbox_content(int socket, Mail **mails, int mailAmount);
+int send_message_from_inbox_content(int socket, Mail **mails, unsigned short mailAmount);
 
 /* Receive inbox content data from a message */
-int recv_inbox_content_from_message(int socket, Mail **mails, int *mailAmount);
+int recv_inbox_content_from_message(int socket, Mail **mails, unsigned short *mailAmount);
 
 /* Send get mail by id message */
 int send_get_mail_message(int socket, unsigned short mailID);
