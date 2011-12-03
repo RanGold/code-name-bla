@@ -41,7 +41,7 @@ void free_users_array(User *users, int usersAmount) {
 	for (i = 0; i < usersAmount; i++) {
 		for (j = 0; j < users[i].mailsUsed; j++) {
 			if (users[i].mails[j] != NULL) {
-				/* Nullifing the mail in all of its occurrences */
+				/* Nullifying the mail in all of its occurrences */
 				for (k = i + 1; (k < usersAmount) &&
 				(users[i].mails[j]->numRefrences > 1); k++) {
 					for (l = 0; (l < users[k].mailsUsed) &&
