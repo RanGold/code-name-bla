@@ -139,6 +139,7 @@ int insert_file_data_to_attachment(Attachment *attachment, char* path) {
 	temp = strrchr(path, '/') + 1;
 	attachment->fileName = (char*)calloc(strlen(temp) + 1, 1);
 	if (attachment->fileName == NULL) {
+		fclose(file);
 		free_attachment(attachment);
 		return (ERROR);
 	}
@@ -147,15 +148,18 @@ int insert_file_data_to_attachment(Attachment *attachment, char* path) {
 	/* Preparing data */
 	attachment->data = (unsigned char*)calloc(attachment->size, 1);
 	if (attachment->data == NULL) {
+		fclose(file);
 		free_attachment(attachment);
 		return (ERROR);
 	}
 	readBytes = fread(attachment->data, 1, attachment->size, file);
 	if (readBytes != attachment->size) {
+		fclose(file);
 		free_attachment(attachment);
 		return (ERROR);
 	}
 
+	fclose(file);
 	return (0);
 }
 
@@ -312,6 +316,11 @@ int main(int argc, char** argv) {
 		free(stringMessage);
 	}
 
+	/* Initializing structs */
+	memset(&mail, 0, sizeof(Mail));
+	memset(&attachment, 0, sizeof(Attachment));
+	mails = NULL;
+
 	do {
 		res = 0;
 		fgets(input, MAX_INPUT_LEN, stdin);
@@ -365,6 +374,7 @@ int main(int argc, char** argv) {
 
 			print_inbox_info(mailAmount, mails);
 			free_mails(mailAmount, mails);
+			free(mails);
 		} else if (sscanf(input, GET_MAIL "%hu", &mailID) == 1) {
 			res = send_get_mail_message(clientSocket, mailID);
 			res = handle_return_value(res);

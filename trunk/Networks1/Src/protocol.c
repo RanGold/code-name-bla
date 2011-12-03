@@ -305,13 +305,12 @@ int prepare_credentials_from_message(Message* message, char* userName, char* pas
 
 	memcpy(credentials, message->data, message->size);
 	credentials[message->size] = 0;
-	if (sscanf((char*) message->data, "%s\t%s", userName, password) != 2) {
-		free_message(message);
-		return (ERROR);
-	}
-
 	free_message(message);
-	return (0);
+	if (sscanf(credentials, "%s\t%s", userName, password) != 2) {
+		return (ERROR);
+	} else {
+		return (0);
+	}
 }
 
 int send_credentials_deny_message(int socket) {
