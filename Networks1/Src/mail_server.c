@@ -15,58 +15,6 @@ typedef struct {
 	Mail** mails;
 } User;
 
-/* TODO: delete this */
-void create_stub(User *user){
-	Mail mail1, mail2;
-	FILE* file;
-
-	memset(&mail1, 0, sizeof(Mail));
-	memset(&mail2, 0, sizeof(Mail));
-
-	mail1.sender = calloc(4, 1);
-	strcpy(mail1.sender, "ran");
-	mail1.subject = calloc(5, 1);
-	strcpy(mail1.subject, "test");
-	mail1.body = calloc(strlen("this is a test message"), 1);
-	strcpy(mail1.body, "this is a test message");
-	mail1.numAttachments = 1;
-	mail1.attachments = calloc(1, sizeof(Attachment));
-	mail1.attachments[0].size = 27;
-	mail1.attachments[0].fileName = calloc(6, 1);
-	strcpy(mail1.attachments[0].fileName, "users");
-	mail1.attachments[0].data = calloc(27,1);
-	file = fopen("/home/student/EclipseWorkspace/Networks1/users", "r");
-	fread(mail1.attachments[0].data, 27, 1, file);
-	fclose(file);
-	mail1.numRecipients = 2;
-	mail1.recipients = calloc(2, sizeof(char*));
-	mail1.recipients[0] = calloc(5, 1);
-	strcpy(mail1.recipients[0], "amir");
-	mail1.recipients[1] = calloc(6, 1);
-	strcpy(mail1.recipients[1], "tammy");
-	mail1.numRefrences = 1;
-
-	mail2.sender = calloc(5, 1);
-	strcpy(mail2.sender, "amir");
-	mail2.subject = calloc(6, 1);
-	strcpy(mail2.subject, "test2");
-	mail2.numAttachments = 0;
-	mail2.numRecipients = 0;
-	mail2.body = calloc(strlen("this is a test message"), 1);
-	strcpy(mail2.body, "Hey there, sup?");
-	mail2.numRefrences = 1;
-
-	user->mails = calloc(4, sizeof(Mail*));
-	user->mails[0] = calloc(sizeof(Mail), 1);
-	*(user->mails[0]) = mail1;
-	user->mails[1] = NULL;
-	user->mails[2] = calloc(sizeof(Mail), 1);
-	*(user->mails[2]) = mail2;
-	user->mailsUsed = 3;
-	user->mailArraySize = 4;
-
-}
-
 int count_rows(FILE* file) {
 
 	int counter = 0;
@@ -91,12 +39,12 @@ void free_users_array(User *users, int usersAmount) {
 	int i, j, k, l;
 
 	for (i = 0; i < usersAmount; i++) {
-		for (j = 0; j <= users[i].mailsUsed; j++) {
+		for (j = 0; j < users[i].mailsUsed; j++) {
 			if (users[i].mails[j] != NULL) {
 				/* Nullifing the mail in all of its occurrences */
 				for (k = i + 1; (k < usersAmount) &&
 				(users[i].mails[j]->numRefrences > 1); k++) {
-					for (l = 0; (l <= users[k].mailsUsed) &&
+					for (l = 0; (l < users[k].mailsUsed) &&
 					(users[i].mails[j]->numRefrences > 1); l++) {
 						if (users[k].mails[l] == users[i].mails[j]) {
 							users[i].mails[j]->numRefrences--;
@@ -370,8 +318,6 @@ int main(int argc, char** argv) {
 						res = send_credentials_deny_message(clientSocket);
 					} else {
 						res = send_credentials_approve_message(clientSocket);
-						/* TODO: delete this */
-						/*create_stub(curUser);*/
 					}
 
 					res = handle_return_value(res);
