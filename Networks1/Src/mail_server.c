@@ -161,12 +161,15 @@ int delete_mail(User *user, unsigned short mailID) {
 	}
 
 	/* Removing reference */
-	user->mails[mailID - 1] = NULL;
 	mail->numRefrences--;
 
+	/* Freeing the mail struct if needed */
 	if (mail->numRefrences == 0) {
 		free_mail(mail);
+		free(user->mails[mailID - 1]);
 	}
+	
+	user->mails[mailID - 1] = NULL;
 
 	return (0);
 }
