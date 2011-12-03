@@ -1,4 +1,3 @@
-#define MAX_ROW_LENGTH 256
 #define WELLCOME_MESSAGE "Welcome! I am simple-mail-server."
 #define SERVER_USAGE_MSG "Usage mail_server <users_file> [port]"
 #define INIT_USER_ARR_FAILED "Failed initiallizing users array"
