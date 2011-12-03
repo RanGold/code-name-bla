@@ -172,7 +172,7 @@ void prepare_client_ids(User *user) {
 
 Mail* get_mail_by_id (User *user, unsigned short mailID) {
 
-	if (mailID > user->mailsUsed) {
+	if ((mailID <= 0) || (mailID > user->mailsUsed)) {
 		return (NULL);
 	} else {
 		return (user->mails[mailID - 1]);
@@ -185,7 +185,7 @@ Attachment* get_attachment_by_id (User *user, short mailID, unsigned char attach
 
 	Mail* mail = get_mail_by_id(user, mailID);
 
-	if ((mail != NULL) && (mail->numAttachments >= attachmentID)) {
+	if ((mail != NULL) && (attachmentID > 0) && (mail->numAttachments >= attachmentID)) {
 		return (mail->attachments + attachmentID - 1);
 	}
 
