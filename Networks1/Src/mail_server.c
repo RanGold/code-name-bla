@@ -88,12 +88,22 @@ int count_rows(FILE* file) {
 
 void free_users_array(User *users, int usersAmount) {
 
-	int i, j;
+	int i, j, k, l;
 
 	for (i = 0; i < usersAmount; i++) {
 		for (j = 0; j <= users[i].mailsUsed; j++) {
 			if (users[i].mails[j] != NULL) {
+				/* Nullifing the mail in all of its occurrences */
+				for (k = i + 1; k < usersAmount; k++) {
+					for (l = 0; l <= users[k].mailsUsed; l++) {
+						if (users[k].mails[l] == users[i].mails[j]) {
+							users[k].mails[l] = NULL;
+						}
+					}
+				}
+
 				free_mail(users[i].mails[j]);
+				free(users[i].mails[j]);
 			}
 		}
 		free(users[i].mails);
@@ -278,6 +288,7 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 
 				users[i].mails[users[i].mailsUsed] = mail;
 				users[i].mailsUsed++;
+				mail->numRefrences++;
 			}
 		}
 	}
