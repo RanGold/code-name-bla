@@ -94,9 +94,12 @@ void free_users_array(User *users, int usersAmount) {
 		for (j = 0; j <= users[i].mailsUsed; j++) {
 			if (users[i].mails[j] != NULL) {
 				/* Nullifing the mail in all of its occurrences */
-				for (k = i + 1; k < usersAmount; k++) {
-					for (l = 0; l <= users[k].mailsUsed; l++) {
+				for (k = i + 1; (k < usersAmount) &&
+				(users[i].mails[j]->numRefrences > 1); k++) {
+					for (l = 0; (l <= users[k].mailsUsed) &&
+					(users[i].mails[j]->numRefrences > 1); l++) {
 						if (users[k].mails[l] == users[i].mails[j]) {
+							users[i].mails[j]->numRefrences--;
 							users[k].mails[l] = NULL;
 						}
 					}
