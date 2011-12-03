@@ -65,6 +65,9 @@ typedef struct {
 /* Frees the message struct */
 void free_message(Message *message);
 
+/* Send a message to the stream */
+int send_message(int targetSocket, Message *message);
+
 /* Receive a message from the stream */
 int recv_message(int sourceSocket, Message *message);
 
