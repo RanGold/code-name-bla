@@ -43,7 +43,11 @@ typedef enum {
 	DeleteApprove,
 	Compose,
 	SendApprove,
-	InvalidCommand
+	InvalidCommand,
+	ShowOnlineUsers,
+	OnlineUsers,
+	ChatMessageSend,
+	ChatMessageReceive
 } MessageType;
 
 /* This enum is to represent common message size's */
