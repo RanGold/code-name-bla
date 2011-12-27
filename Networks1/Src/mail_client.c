@@ -29,41 +29,6 @@
 #include "common.h"
 #include "protocol.h"
 
-/* Save a file from an attachment struct to a certain path */
-int save_file_from_attachment(Attachment *attachment, char *savePath) {
-
-	FILE *file;
-	char *path;
-	int pathLength;
-	size_t writenBytes;
-
-	/* Preparing full path */
-	pathLength = strlen(attachment->fileName) + strlen(savePath) + 1;
-	path = (char*)calloc(pathLength, 1);
-	if (path == NULL) {
-		return (ERROR);
-	}
-	strcat(path, savePath);
-	strcat(path, attachment->fileName);
-
-	file = get_valid_file(path, "w");
-	if (file == NULL) {
-		free(path);
-		return(ERROR);
-	}
-
-	writenBytes = fwrite(attachment->data, 1, attachment->size, file);
-	if (writenBytes != attachment->size) {
-		fclose(file);
-		free(path);
-		return(ERROR);
-	}
-
-	fclose(file);
-	free(path);
-	return (0);
-}
-
 /* Print inbox headers data to stdin */
 void print_inbox_info(int mailAmount, Mail *mails) {
 
@@ -118,11 +83,10 @@ int count_occurrences(char *str, char chr) {
 /* The whole file is inserted to an attachment because the use of file system */
 /* is a part of the client implementation, and the the protocol which only recognize */
 /* the attachment data structure */
-int insert_file_data_to_attachment(Attachment *attachment, char* path) {
+int insert_file_header_to_attachment(Attachment *attachment, char* path) {
 
 	char* temp;
 	FILE* file = get_valid_file(path, "r");
-	int readBytes;
 
 	if (file == NULL) {
 		return (ERROR);
@@ -146,24 +110,13 @@ int insert_file_data_to_attachment(Attachment *attachment, char* path) {
 	strncpy(attachment->fileName, temp, strlen(temp));
 
 	/* Preparing data */
-	attachment->data = (unsigned char*)calloc(attachment->size, 1);
-	if (attachment->data == NULL) {
-		fclose(file);
-		free_attachment(attachment);
-		return (ERROR);
-	}
-	readBytes = fread(attachment->data, 1, attachment->size, file);
-	if (readBytes != attachment->size) {
-		fclose(file);
-		free_attachment(attachment);
-		return (ERROR);
-	}
+	attachment->data = NULL;
+	attachment->file = file;
 
-	fclose(file);
 	return (0);
 }
 
-/* Inserting the inputed (valid) compose input to a mail struct  including attachments files data */
+/* Inserting the inputed (valid) compose input to a mail struct including attachments files data */
 int prepare_mail_from_compose_input(Mail *mail, char *curUser,
 		char *tempRecipients, char *tempSubject, char *tempAttachments,
 		char *tempText) {
@@ -239,7 +192,7 @@ int prepare_mail_from_compose_input(Mail *mail, char *curUser,
 		}
 
 		for (i = 0; i < mail->numAttachments; i++) {
-			res = insert_file_data_to_attachment(mail->attachments + i, temp);
+			res = insert_file_header_to_attachment(mail->attachments + i, temp);
 			if (res == ERROR) {
 				free_mail(mail);
 				return (ERROR);
@@ -259,7 +212,7 @@ int main(int argc, char** argv) {
 	int clientSocket;
 	struct addrinfo hints, *servinfo;
 	int res;
-	char* stringMessage;
+	char *stringMessage;
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
 	char input[MAX_INPUT_LEN + 1];
@@ -396,6 +349,7 @@ int main(int argc, char** argv) {
 			}
 		} else if (sscanf(input, GET_ATTACHMENT "%hu %hu \"%[^\"]\"", &mailID,
 				&tempAttachmentID, attachmentPath) == 3) {
+
 			/* Converting to unsigned char while zeroing the non important bits */
 			attachmentID = (unsigned char)tempAttachmentID;
 			res = send_get_attachment_message(clientSocket, mailID,
@@ -405,7 +359,7 @@ int main(int argc, char** argv) {
 				break;
 			}
 
-			res = recv_attachment_from_message(clientSocket, &attachment);
+			res = recv_attachment_file_from_message(clientSocket, &attachment, attachmentPath);
 			res = handle_return_value(res);
 			if (res == ERROR) {
 				free_mail(&mail);
@@ -415,15 +369,7 @@ int main(int argc, char** argv) {
 				res = 0;
 				continue;
 			} else {
-				res = save_file_from_attachment(&attachment, attachmentPath);
-				res = handle_return_value(res);
-				if (res == ERROR) {
-					free_attachment(&attachment);
-					break;
-				} else {
-					free_attachment(&attachment);
-					printf(ATTACHMENT_SAVE_MESSAGE);
-				}
+				printf(ATTACHMENT_SAVE_MESSAGE);
 			}
 		} else if (sscanf(input, DELETE_MAIL "%hu", &mailID) == 1) {
 			res = send_delete_mail_message(clientSocket, mailID);
