@@ -10,6 +10,7 @@ typedef struct {
 	char* fileName;
 	int size;
 	unsigned char* data;
+	FILE* file;
 } Attachment;
 
 /* This struct is for the client and server to represent a mail data structure */
@@ -142,7 +143,7 @@ void prepare_mail_attachment_id_from_message(Message *message, unsigned short *m
 int send_message_from_attachment(int socket, Attachment *attachment);
 
 /* Receive an attachment data from message */
-int recv_attachment_from_message(int socket, Attachment *attachment);
+int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath);
 
 /* Send delete mail by id message */
 int send_delete_mail_message(int socket, unsigned short mailID);

@@ -1,5 +1,6 @@
 #define MESSAGE_TYPE_MASK 0x1F
 #define MESSAGE_SIZE_MASK 0xE0
+#define FILE_CHUNK_SIZE (1024 * 100)
 
 #include "protocol.h"
 
@@ -52,16 +53,46 @@ void free_message(Message *message) {
 	memset(message, 0, sizeof(Message));
 }
 
-int send_message(int targetSocket, Message *message) {
+/* Sends an attachment to stream */
+int send_attachment(int targetSocket, Attachment *attachment) {
+	int i, bytesToSend, netAttachmentSize, res;
+	unsigned char buffer[FILE_CHUNK_SIZE];
 
+	bytesToSend = sizeof(int);
+	netAttachmentSize = htonl(attachment->size);
+	res = send_all(targetSocket, (unsigned char*) &(netAttachmentSize),
+			&bytesToSend);
+	if (res == ERROR) {
+		return ERROR;
+	}
+
+	res = fseek(attachment->file, 0, SEEK_SET);
+	for (i = 0; i < attachment->size; i += FILE_CHUNK_SIZE) {
+		bytesToSend = fread(buffer, 1, FILE_CHUNK_SIZE, attachment->file);
+		if ((bytesToSend != FILE_CHUNK_SIZE) && (bytesToSend != (attachment->size - i))) {
+			return ERROR;
+		}
+		res = send_all(targetSocket, buffer, &bytesToSend);
+		if (res == ERROR) {
+			return ERROR;
+		}
+	}
+
+	return 0;
+}
+
+/* Send a message to the stream with attachments */
+int send_message_with_attachments(int targetSocket, Message *message,
+		Mail *mail) {
 	int bytesToSend;
-	int res, netMessageSize;
+	int res, i, netMessageSize;
 	unsigned char header;
 	unsigned int len = 0;
 
 	/* Sending header */
 	bytesToSend = 1;
-	header = (((unsigned char)(message->messageType)) | (((unsigned char)(message->messageSize))<<5));
+	header = (((unsigned char) (message->messageType))
+			| (((unsigned char) (message->messageSize)) << 5));
 	res = send_all(targetSocket, &header, &bytesToSend);
 
 	/* In case of an error we stop before sending the data */
@@ -76,7 +107,8 @@ int send_message(int targetSocket, Message *message) {
 	if (message->messageSize == VariedSize) {
 		bytesToSend = sizeof(int);
 		netMessageSize = htonl(message->size);
-		res = send_all(targetSocket, (unsigned char*)&(netMessageSize), &bytesToSend);
+		res = send_all(targetSocket, (unsigned char*) &(netMessageSize),
+				&bytesToSend);
 		if (res == ERROR) {
 			free_message(message);
 			return (ERROR);
@@ -86,6 +118,11 @@ int send_message(int targetSocket, Message *message) {
 	/* Sending data (if needed) */
 	if (message->messageSize != ZeroSize) {
 		bytesToSend = message->size;
+		if (mail != NULL) {
+			for (i = 0; i < mail->numAttachments; i++) {
+				bytesToSend -= mail->attachments[i].size + sizeof(int);
+			}
+		}
 		res = send_all(targetSocket, message->data, &bytesToSend);
 		if (res == ERROR) {
 			free_message(message);
@@ -93,12 +130,28 @@ int send_message(int targetSocket, Message *message) {
 		} else {
 			len += bytesToSend;
 		}
-	}
 
+		/* Checking if there are files to send */
+		if (mail != NULL) {
+			for (i = 0; i < mail->numAttachments; i++) {
+				res = send_attachment(targetSocket, mail->attachments + i);
+				if (res == ERROR) {
+					free_message(message);
+					return (ERROR);
+				} else {
+					len += mail->attachments[i].size + sizeof(int);
+				}
+			}
+		}
+	}
 
 	res = (len == (message->size + 1) ? 0 : ERROR_LOGICAL);
 	free_message(message);
-	return(res);
+	return (res);
+}
+
+int send_message(int targetSocket, Message *message) {
+	return send_message_with_attachments(targetSocket, message, NULL);
 }
 
 int recv_message(int sourceSocket, Message *message) {
@@ -147,7 +200,6 @@ int recv_message(int sourceSocket, Message *message) {
 		message->data = calloc(message->size, 1);
 		res = recv_all(sourceSocket, message->data, &bytesToRecv);
 		if (res != 0) {
-			free(message->data);
 			return (res);
 		} else {
 			len += bytesToRecv;
@@ -348,6 +400,10 @@ void free_attachment(Attachment *attachment) {
 
 	if (attachment->fileName != NULL) {
 		free(attachment->fileName);
+	}
+
+	if (attachment->file != NULL) {
+		fclose(attachment->file);
 	}
 
 	memset(attachment, 0, sizeof(Attachment));
@@ -869,9 +925,46 @@ int send_message_from_attachment(int socket, Attachment *attachment) {
 	return (0);
 }
 
-int prepare_attachment_from_message(Message *message, Attachment *attachment) {
+/* Save a file from an attachment struct to a certain path */
+int save_file_from_attachment(Attachment *attachment, char *savePath) {
 
-	int fileNameLength;
+	FILE *file;
+	char *path;
+	int pathLength;
+	size_t writenBytes;
+
+	/* Preparing full path */
+	pathLength = strlen(attachment->fileName) + strlen(savePath) + 1;
+	path = (char*)calloc(pathLength, 1);
+	if (path == NULL) {
+		return (ERROR);
+	}
+	strcat(path, savePath);
+	strcat(path, attachment->fileName);
+
+	file = get_valid_file(path, "w");
+	if (file == NULL) {
+		free(path);
+		return(ERROR);
+	}
+
+	writenBytes = fwrite(attachment->data, 1, attachment->size, file);
+	if (writenBytes != attachment->size) {
+		fclose(file);
+		free(path);
+		return(ERROR);
+	}
+
+	fclose(file);
+	free(path);
+	return (0);
+}
+
+int prepare_attachment_file_from_message(Message *message, Attachment *attachment, char* attachmentPath) {
+
+	int fileNameLength, res = 0;
+
+	memset(attachment, 0, sizeof(Attachment));
 
 	/* Getting the attachment's name from the message */
 	fileNameLength = strlen((char*) message->data) + 1;
@@ -883,18 +976,15 @@ int prepare_attachment_from_message(Message *message, Attachment *attachment) {
 
 	/* Getting the attachment's data from the message */
 	attachment->size = message->size - fileNameLength;
-	attachment->data = (unsigned char*) calloc(attachment->size, 1);
-	if (attachment->data == NULL) {
-		free(attachment->fileName);
-		attachment->fileName = NULL;
-		return (ERROR);
-	}
-	memcpy(attachment->data, message->data + fileNameLength, attachment->size);
+	attachment->data = message->data + fileNameLength;
+	res = save_file_from_attachment(attachment, attachmentPath);
 
-	return (0);
+	attachment->data = NULL;
+	free_attachment(attachment);
+	return (res);
 }
 
-int recv_attachment_from_message(int socket, Attachment *attachment) {
+int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath) {
 
 	int res;
 	Message message;
@@ -904,7 +994,7 @@ int recv_attachment_from_message(int socket, Attachment *attachment) {
 		return (res);
 	}
 
-	res = prepare_attachment_from_message(&message, attachment);
+	res = prepare_attachment_file_from_message(&message, attachment, attachmentPath);
 	free_message(&message);
 	return (res);
 }
@@ -937,9 +1027,9 @@ int recv_delete_result(int socket) {
 	}
 }
 
-int calculate_full_mail_size(Mail *mail) {
+int calculate_attachemnts_size(Mail *mail) {
 
-	int i, size = calculate_mail_size(mail);
+	int i, size = 0;
 
 	for (i = 0; i < mail->numAttachments; i++) {
 		size += sizeof(mail->attachments[i].size);
@@ -949,40 +1039,24 @@ int calculate_full_mail_size(Mail *mail) {
 	return size;
 }
 
-void insert_mail_attachments_to_buffer(unsigned char *buffer, int *offset, Mail *mail) {
-
-	int i, netAttachmentSize;
-
-	/* Inserting attachments data */
-	for (i = 0; i < mail->numAttachments; i++) {
-		netAttachmentSize = htonl(mail->attachments[i].size);
-		memcpy(buffer + *offset, &(netAttachmentSize),
-				sizeof(netAttachmentSize));
-		*offset += sizeof(netAttachmentSize);
-
-		memcpy(buffer + *offset, mail->attachments[i].data,
-						mail->attachments[i].size);
-		*offset += mail->attachments[i].size;
-	}
-}
-
 int prepare_compose_message_from_mail(Mail *mail, Message *message) {
 
 	int offset = 0;
 
 	message->messageType = Compose;
-	message->size = calculate_full_mail_size(mail);
+	message->size = calculate_mail_size(mail);
 	message->messageSize = VariedSize;
 	message->data = calloc(message->size, 1);
 	if (message->data == NULL) {
 		return (ERROR);
 	}
 
+	/* Attachments not part of the buffer */
+	message->size += calculate_attachemnts_size(mail);
+
 	insert_mail_header_to_buffer(message->data, &offset, mail);
 
 	insert_mail_contents_to_buffer(message->data, &offset, mail);
-
-	insert_mail_attachments_to_buffer(message->data, &offset, mail);
 
 	return (0);
 }
@@ -996,7 +1070,7 @@ int send_compose_message_from_mail(int socket, Mail *mail) {
 		return (ERROR);
 	}
 
-	if ((res = send_message(socket, &message)) != 0) {
+	if ((res = send_message_with_attachments(socket, &message, mail)) != 0) {
 		return (res);
 	}
 
