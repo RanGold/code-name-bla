@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
 	/* Variables declaration */
 	char hostname[MAX_HOST_NAME_LEN + 1] = DEFAULT_HOST_NAME;
 	char portString[MAX_PORT_LEN + 1] = DEFAULT_PORT;
-	int clientSocket;
+	int clientSocket,chatSocket;
 	struct addrinfo hints, *servinfo;
 	int res;
 	char *stringMessage;
@@ -257,6 +257,14 @@ int main(int argc, char** argv) {
 		return (ERROR);
 	}
 
+	chatSocket = socket(PF_INET, SOCK_STREAM, 0);
+	res = connect(chatSocket, servinfo->ai_adai_addrdr, servinfo->ai_addrlen);
+	if (res == ERROR) {
+		print_error();
+		freeaddrinfo(servinfo);
+		return (ERROR);
+	}
+
 	/* Receiving welcome message */
 	res = recv_string_from_message(clientSocket, &stringMessage);
 	res = handle_return_value(res);
@@ -268,6 +276,17 @@ int main(int argc, char** argv) {
 		printf("%s\n", stringMessage);
 		free(stringMessage);
 	}
+
+	res = recv_string_from_message(chatSocket, &stringMessage);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		close(chatSocket);
+		freeaddrinfo(servinfo);
+		return (ERROR);
+	} else {
+		free(stringMessage);
+	}
+
 
 	/* Initializing structs */
 	memset(&mail, 0, sizeof(Mail));

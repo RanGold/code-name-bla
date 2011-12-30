@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sys/select.h>
 #include "common.h"
 
 /* This struct is for the client and server to represent an attachment data structure */
@@ -30,7 +31,8 @@ typedef struct {
 typedef enum {
 	String,
 	Quit,
-	Credentials,
+	CredentialsMain,
+	CredentialsChat,
 	CredentialsApprove,
 	CredentialsDeny,
 	ShowInbox,
@@ -76,6 +78,9 @@ int send_message(int targetSocket, Message *message);
 /* Receive a message from the stream */
 int recv_message(int sourceSocket, Message *message);
 
+/* prepares a message from string */
+int prepare_message_from_string(char* str, Message* message);
+
 /* Send a message from a string */
 int send_message_from_string (int socket, char *str);
 
@@ -86,7 +91,7 @@ int recv_string_from_message (int socket, char **str);
 int send_quit_message(int socket);
 
 /* Send a message containing credentials data */
-int send_message_from_credentials(int socket, char* userName, char* password);
+int send_message_from_credentials(int socket, int chatSocket, char* userName, char* password);
 
 /* Preparing credentials data from a received message */
 int prepare_credentials_from_message(Message* message, char* userName, char* password);
