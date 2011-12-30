@@ -7,12 +7,28 @@
 #include "protocol.h"
 
 typedef struct {
+	Message message;
+	int offset;
+} UserBuffer;
+
+typedef struct {
 	char name[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
 	unsigned short mailsUsed;
 	unsigned short mailArraySize;
 	Mail** mails;
+	int mainSocket;
+	int chatSocket;
+	int isOnline;
+	UserBuffer mainBuffer;
+	UserBuffer chatBuffer;
 } User;
+
+typedef struct {
+	int socket;
+	UserBuffer buffer;
+	int isActive;
+} UnrecognizedUser;
 
 int count_rows(FILE* file) {
 
@@ -37,29 +53,39 @@ void free_users_array(User *users, int usersAmount) {
 
 	int i, j, k, l;
 
-	for (i = 0; i < usersAmount; i++) {
-		for (j = 0; j < users[i].mailsUsed; j++) {
-			if (users[i].mails[j] != NULL) {
-				/* Nullifying the mail in all of its occurrences */
-				for (k = i + 1; (k < usersAmount) &&
-				(users[i].mails[j]->numRefrences > 1); k++) {
-					for (l = 0; (l < users[k].mailsUsed) &&
-					(users[i].mails[j]->numRefrences > 1); l++) {
-						if (users[k].mails[l] == users[i].mails[j]) {
-							users[i].mails[j]->numRefrences--;
-							users[k].mails[l] = NULL;
+	if (users != NULL){
+		for (i = 0; i < usersAmount; i++) {
+			for (j = 0; j < users[i].mailsUsed; j++) {
+				if (users[i].mails[j] != NULL) {
+					/* Nullifying the mail in all of its occurrences */
+					for (k = i + 1; (k < usersAmount) &&
+					(users[i].mails[j]->numRefrences > 1); k++) {
+						for (l = 0; (l < users[k].mailsUsed) &&
+						(users[i].mails[j]->numRefrences > 1); l++) {
+							if (users[k].mails[l] == users[i].mails[j]) {
+								users[i].mails[j]->numRefrences--;
+								users[k].mails[l] = NULL;
+							}
 						}
 					}
+
+					free_mail(users[i].mails[j]);
+					free(users[i].mails[j]);
 				}
-
-				free_mail(users[i].mails[j]);
-				free(users[i].mails[j]);
 			}
-		}
-		free(users[i].mails);
-	}
 
-	free(users);
+			if (users[i].mails != NULL){
+				free(users[i].mails);
+				users[i].mails = NULL;
+			}
+
+			free_message(&(users[i].mainBuffer.message));
+			free_message(&(users[i].chatBuffer.message));
+		}
+
+		free(users);
+		users = NULL;
+	}
 }
 
 int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
@@ -168,7 +194,7 @@ int delete_mail(User *user, unsigned short mailID) {
 		free_mail(mail);
 		free(user->mails[mailID - 1]);
 	}
-	
+
 	user->mails[mailID - 1] = NULL;
 
 	return (0);
@@ -249,20 +275,159 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 	return (0);
 }
 
+int add_unrecognized_socket(UnrecognizedUser **unrecognizedUsers, int *unrecognizedUsersSize,
+		int *unreconizedUsersAmount, int unrecognizedSocket, Message message){
+	int i;
+
+	for (i = 0; i < *unreconizedUsersAmount; i++){
+		if (!(*unrecognizedUsers)[i].isActive){
+			(*unrecognizedUsers)[i].buffer.message = message;
+			(*unrecognizedUsers)[i].isActive = 1;
+			(*unrecognizedUsers)[i].socket = unrecognizedSocket;
+			(*unreconizedUsersAmount)++;
+			break;
+		}
+	}
+
+	if (*unrecognizedUsersSize == *unreconizedUsersAmount){
+		(*unrecognizedUsersSize) *= 2;
+		*unrecognizedUsers = realloc(*unrecognizedUsers, *unrecognizedUsersSize * sizeof(UnrecognizedUser));
+		if (*unrecognizedUsers == NULL){
+			return (ERROR);
+		}
+	}
+	return (0);
+
+}
+
+void handleErrorFds(fd_set *errorfds, User *users, UnrecognizedUser *unrecognizedUsers, int usersAmount,
+					int unrecognizedUsersAmount) {
+	int i;
+
+	for (i = 0; i < usersAmount; i++){
+		if (FD_ISSET(users[i].mainSocket, errorfds) ){
+			users[i].isOnline = 0;
+			close(users[i].mainSocket);
+			close(users[i].chatSocket);
+			users[i].mainSocket = -1;
+			users[i].chatSocket = -1;
+		}
+
+		free_message(&(users[i].mainBuffer.message));
+		free_message(&(users[i].chatBuffer.message));
+	}
+
+	for (i = 0; i < unrecognizedUsersAmount; i++){
+		if (FD_ISSET(unrecognizedUsers[i].socket, errorfds) ){
+			close(unrecognizedUsers[i].socket);
+			unrecognizedUsers[i].socket = -1;
+			unrecognizedUsers[i].isActive = 0;
+			free_message(&(unrecognizedUsers[i].buffer.message));
+		}
+	}
+}
+
+int handleReadFds(fd_set *readfds, int listenSocket, User *users, int userAmounts,
+		UnrecognizedUser **unrecognizedUsers, int *unreconizedUsersAmount, int *unrecognizedUsersSize) {
+	int i, unrecognizedSocket, res;
+	unsigned int len;
+	struct sockaddr_in clientAddr;
+	Message message;
+
+	if (FD_ISSET(listenSocket, readfds)){
+		/* Prepare structure for client address */
+		len = sizeof(clientAddr);
+
+		/* Start waiting until client connect */
+		unrecognizedSocket = accept(listenSocket, (struct sockaddr*) &clientAddr, &len);
+		if (unrecognizedSocket == -1) {
+			print_error();
+			return ERROR;
+		}
+
+		res = prepare_message_from_string(WELLCOME_MESSAGE, &message);
+		if (res != 0) {
+			free_message(&message);
+			return (res);
+		}
+
+		res = add_unrecognized_socket(unrecognizedUsers, unrecognizedUsersSize,
+								unreconizedUsersAmount, unrecognizedSocket, message);
+		if (res == ERROR){
+			free_message(&message);
+			return (res);
+		}
+	}
+
+
+	for (i = 0; i < userAmounts; i++){
+		if ((users[i].isOnline) && (FD_ISSET(users[i].mainSocket, readfds))){
+
+		}
+	}
+}
+
+void refreshSets(fd_set *readfds, fd_set *writefds, fd_set *errorfds, int *maxSocket,
+				int listenSocket, User *users, int userAmount,
+				UnrecognizedUser *unrecognizedUsers, int unrecognizedUsersAmount) {
+	int i;
+	*maxSocket = listenSocket;
+
+	FD_ZERO(readfds);
+	FD_ZERO(writefds);
+	FD_ZERO(errorfds);
+
+	FD_SET(listenSocket, readfds);
+
+	for (i = 0; i < userAmount; i++) {
+		if (users[i].isOnline) {
+			if (users[i].mainSocket > *maxSocket){
+				*maxSocket = users[i].mainSocket;
+			}
+			if (users[i].chatSocket > *maxSocket){
+				*maxSocket = users[i].chatSocket;
+			}
+			FD_SET(users[i].mainSocket, readfds);
+			FD_SET(users[i].mainSocket, writefds);
+			FD_SET(users[i].chatSocket, writefds);
+			FD_SET(users[i].mainSocket, errorfds);
+			FD_SET(users[i].chatSocket, errorfds);
+		}
+	}
+	for (i = 0; i < unrecognizedUsersAmount; i++) {
+		if (unrecognizedUsers[i].isActive){
+			if (unrecognizedUsers[i].socket > *maxSocket){
+					*maxSocket = unrecognizedUsers[i].socket;
+				}
+				FD_SET(unrecognizedUsers[i].socket, readfds);
+				FD_SET(unrecognizedUsers[i].socket, writefds);
+				FD_SET(unrecognizedUsers[i].socket, errorfds);
+			}
+		}
+
+	(*maxSocket)++;
+}
+
+
+
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
 	short port = DEAFULT_PORT;
 	int usersAmount, res;
-	unsigned int len;
 	User *users = NULL, *curUser = NULL;
 	int listenSocket, clientSocket;
-	struct sockaddr_in clientAddr;
 	unsigned short mailID;
 	unsigned char attachmentID;
 	Message message;
 	Mail *mail;
 	Attachment *attachment;
+	fd_set readfds, writefds, errorfds;
+	int maxfd;
+	struct timeval tv;
+	UnrecognizedUser *unrecognizedUsers;
+	int unrecognizedUsersSize;
+	int unrecognizedUsersInUse;
 
 	/* Validate number of arguments */
 	if (argc != 2 && argc != 3) {
@@ -285,17 +450,42 @@ int main(int argc, char** argv) {
 		return (ERROR);
 	}
 
+	tv.tv_sec = 0;
+	tv.tv_usec = 500000;
+
+	unrecognizedUsers = (UnrecognizedUser*)calloc(1, sizeof(UnrecognizedUser));
+	if (unrecognizedUsers == NULL) {
+		/* TODO : free unrecognized users */
+		print_error();
+		return (ERROR);
+	}
+	memset(&(unrecognizedUsers[0].buffer), 0, sizeof(UserBuffer));
+	unrecognizedUsersInUse = 0;
+	unrecognizedUsersSize = 1;
+
+
+	do {
+		refreshSets(&readfds, &writefds, &errorfds, &maxfd, listenSocket, users, usersAmount,
+					unrecognizedUsers, unrecognizedUsersSize);
+		res = select(maxfd, &readfds, &writefds, &errorfds, &tv);
+		res = handle_return_value(res);
+
+		if (res == ERROR) {
+			break;
+		}
+		handleErrorFds(&errorfds, users, unrecognizedUsers, usersAmount, unrecognizedUsersSize);
+		handleReadFds(&readfds, listenSocket, users, usersAmount, &unrecognizedUsers, &unrecognizedUsersInUse,
+					&unrecognizedUsersSize);
+		handleSendFds(&writefds, users);
+
+	} while (1);
+
+
+
 	do {
 
-		/* Prepare structure for client address */
-		len = sizeof(clientAddr);
 
-		/* Start waiting until client connect */
-		clientSocket = accept(listenSocket, (struct sockaddr*) &clientAddr, &len);
-		if (clientSocket == -1) {
-			print_error();
-			continue;
-		}
+
 
 		/* Sending welcome message */
 		res = send_message_from_string(clientSocket, WELLCOME_MESSAGE);

@@ -293,12 +293,12 @@ int recv_string_from_message (int socket, char **str) {
 }
 
 int prepare_message_from_credentials(char *userName, char *password,
-		Message *message) {
+		Message *message, int isChatSocket) {
 
 	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 2];
 	sprintf(credentials, "%s\t%s", userName, password);
 
-	message->messageType = Credentials;
+	message->messageType = isChatSocket == 1 ? CredentialsChat : CredentialsMain;
 	message->size = strlen(credentials);
 	message->messageSize = VariedSize;
 	message->data = (unsigned char*) calloc(message->size, 1);
@@ -329,12 +329,21 @@ int send_quit_message(int socket) {
 	return (send_empty_message(socket, Quit));
 }
 
-int send_message_from_credentials(int socket, char* userName, char* password) {
+int send_message_from_credentials(int socket, int chatSocket, char* userName, char* password) {
 
 	Message message;
 	int res;
 
-	if (prepare_message_from_credentials(userName, password, &message) != 0) {
+	if (prepare_message_from_credentials(userName, password, &message,0) != 0) {
+		free_message(&message);
+		return (ERROR);
+	}
+
+	if ((res = send_message(socket, &message)) != 0) {
+		return (res);
+	}
+
+	if (prepare_message_from_credentials(userName, password, &message,1) != 0) {
 		free_message(&message);
 		return (ERROR);
 	}
@@ -350,7 +359,7 @@ int prepare_credentials_from_message(Message* message, char* userName, char* pas
 
 	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 1];
 
-	if (message->messageType != Credentials) {
+	if (message->messageType != CredentialsMain) {
 		free_message(message);
 		return (ERROR);
 	}
