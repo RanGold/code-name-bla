@@ -2,19 +2,10 @@
 #define SERVER_USAGE_MSG "Usage mail_server <users_file> [port]"
 #define INIT_USER_ARR_FAILED "Failed initiallizing users array"
 #define DEAFULT_PORT 6423
-
-#define MESSAGE_TYPE_MASK 0x1F
-#define MESSAGE_SIZE_MASK 0xE0
+#define SELECT_UTIMEVAL 500000
 
 #include "common.h"
 #include "protocol.h"
-
-typedef struct {
-	Message message;
-	int offset;
-	int needMoreInfo;
-	int bytesLeftToComplete;
-} UserBuffer;
 
 typedef struct {
 	char name[MAX_NAME_LEN + 1];
@@ -22,16 +13,16 @@ typedef struct {
 	unsigned short mailsUsed;
 	unsigned short mailArraySize;
 	Mail** mails;
+	int isOnline;
 	int mainSocket;
 	int chatSocket;
-	int isOnline;
-	UserBuffer mainBuffer;
-	UserBuffer chatBuffer;
+	NonBlockingMessage mainBuffer;
+	NonBlockingMessage chatBuffer;
 } User;
 
 typedef struct {
 	int socket;
-	UserBuffer buffer;
+	NonBlockingMessage buffer;
 	int isActive;
 } UnrecognizedUser;
 
@@ -79,13 +70,18 @@ void free_users_array(User *users, int usersAmount) {
 				}
 			}
 
-			if (users[i].mails != NULL){
+			if (users[i].mails != NULL) {
 				free(users[i].mails);
 				users[i].mails = NULL;
 			}
 
-			free_message(&(users[i].mainBuffer.message));
-			free_message(&(users[i].chatBuffer.message));
+			if (users[i].isOnline) {
+				close(users[i].mainSocket);
+				close(users[i].chatSocket);
+			}
+
+			free_non_blocking_message(&(users[i].mainBuffer));
+			free_non_blocking_message(&(users[i].chatBuffer));
 		}
 
 		free(users);
@@ -93,7 +89,7 @@ void free_users_array(User *users, int usersAmount) {
 	}
 }
 
-int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
+int initialize_users_array(int* usersAmount, User** users, char* filePath) {
 
 	int i;
 	FILE* usersFile;
@@ -125,9 +121,41 @@ int initialliaze_users_array(int* usersAmount, User** users, char* filePath) {
 			free_users_array(*users, *usersAmount);
 			return (ERROR);
 		}
+
+		(*users)[i].mainSocket = -1;
+		(*users)[i].chatSocket = -1;
+		(*users)[i].isOnline = 0;
 	}
 
 	fclose(usersFile);
+	return (0);
+}
+
+void free_unrecognized_users_array(UnrecognizedUser *unrecognizedUsers, int unrecognizedUsersSize) {
+	int i;
+
+	if (unrecognizedUsers != NULL) {
+		for (i = 0; i < unrecognizedUsersSize; i++) {
+			free_non_blocking_message(&(unrecognizedUsers[i].buffer));
+
+			if (unrecognizedUsers[i].isActive) {
+				close(unrecognizedUsers[i].socket);
+			}
+		}
+
+		free(unrecognizedUsers);
+	}
+}
+
+int initialize_unrecognized_users_array(UnrecognizedUser **unrecognizedUsers) {
+	(*unrecognizedUsers) = (UnrecognizedUser*)calloc(1, sizeof(UnrecognizedUser));
+	if ((*unrecognizedUsers) == NULL) {
+		return (ERROR);
+	}
+
+	(*unrecognizedUsers)[0].isActive = 0;
+	(*unrecognizedUsers)[0].socket = -1;
+
 	return (0);
 }
 
@@ -264,6 +292,7 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 					if (users[i].mails == NULL) {
 						return(ERROR);
 					}
+
 					/* Initializing new mails */
 					for (k = users[i].mailArraySize / 2; k < users[i].mailArraySize; k++) {
 						users[i].mails[k] = NULL;
@@ -281,11 +310,12 @@ int add_mail_to_server(User *users, int usersAmount, char *curUserName, Mail *ma
 }
 
 int add_unrecognized_socket(UnrecognizedUser **unrecognizedUsers, int *unrecognizedUsersSize,
-		int *unreconizedUsersAmount, int unrecognizedSocket, Message message){
+		int *unreconizedUsersAmount, int unrecognizedSocket, Message message) {
 	int i;
 
-	for (i = 0; i < *unreconizedUsersAmount; i++){
-		if (!(*unrecognizedUsers)[i].isActive){
+	/* Searching for a free unrecognized user spot */
+	for (i = 0; i < *unreconizedUsersAmount; i++) {
+		if (!(*unrecognizedUsers)[i].isActive) {
 			(*unrecognizedUsers)[i].buffer.message = message;
 			(*unrecognizedUsers)[i].isActive = 1;
 			(*unrecognizedUsers)[i].socket = unrecognizedSocket;
@@ -294,52 +324,26 @@ int add_unrecognized_socket(UnrecognizedUser **unrecognizedUsers, int *unrecogni
 		}
 	}
 
+	/* Checking if the unrecognized users array needs to be resized */
 	if (*unrecognizedUsersSize == *unreconizedUsersAmount){
 		(*unrecognizedUsersSize) *= 2;
-		*unrecognizedUsers = realloc(*unrecognizedUsers, *unrecognizedUsersSize * sizeof(UnrecognizedUser));
+		(*unrecognizedUsers) = realloc(*unrecognizedUsers, *unrecognizedUsersSize * sizeof(UnrecognizedUser));
 		if (*unrecognizedUsers == NULL){
 			return (ERROR);
 		}
+
+		/* Initializing new unrecognized users */
+		for (i = (*unrecognizedUsersSize) / 2; i < (*unrecognizedUsersSize); i++) {
+			memset(&((*unrecognizedUsers)[i].buffer), 0, sizeof(NonBlockingMessage));
+			(*unrecognizedUsers)[i].isActive = 0;
+			(*unrecognizedUsers)[i].socket = -1;
+		}
 	}
+
 	return (0);
-
 }
 
-int free_user_buffer(UserBuffer *userBuffer){
-	userBuffer->bytesLeftToComplete = 0;
-	free_message(&(userBuffer->message));
-	userBuffer->needMoreInfo = 0;
-	userBuffer->offset = 0;
-}
-
-
-void handle_error_fds(fd_set *errorfds, User *users, UnrecognizedUser *unrecognizedUsers, int usersAmount,
-					int unrecognizedUsersAmount) {
-	int i;
-
-	for (i = 0; i < usersAmount; i++){
-		if (FD_ISSET(users[i].mainSocket, errorfds) ){
-			users[i].isOnline = 0;
-			close(users[i].mainSocket);
-			close(users[i].chatSocket);
-			users[i].mainSocket = -1;
-			users[i].chatSocket = -1;
-		}
-
-		free_message(&(users[i].mainBuffer.message));
-		free_message(&(users[i].chatBuffer.message));
-	}
-
-	for (i = 0; i < unrecognizedUsersAmount; i++){
-		if (FD_ISSET(unrecognizedUsers[i].socket, errorfds) ){
-			close(unrecognizedUsers[i].socket);
-			unrecognizedUsers[i].socket = -1;
-			unrecognizedUsers[i].isActive = 0;
-			free_message(&(unrecognizedUsers[i].buffer.message));
-		}
-	}
-}
-
+/* Accepting new connections */
 int do_accept(int listenSocket, UnrecognizedUser **unrecognizedUsers, int *unrecognizedUsersSize,
 		int *unreconizedUsersAmount) {
 	unsigned int len;
@@ -373,140 +377,134 @@ int do_accept(int listenSocket, UnrecognizedUser **unrecognizedUsers, int *unrec
 	return (0);
 }
 
-/* TODO: needs to feel the buffer with the user's inbox info for the send phase */
+/* TODO: needs to fill the buffer with the user's inbox info for the send phase */
 int do_show_inbox() {}
 
-/* TODO: needs to feel the buffer with the mail for the send phase */
+/* TODO: needs to fill the buffer with the mail for the send phase */
 int do_get_mail() {}
 
-/* TODO: needs to feel the buffer with the attachment for the send phase */
+/* TODO: needs to fill the buffer with the attachment for the send phase */
 int do_get_attachment() {}
 
 /* TODO: 1.delete the mail
-	     2.needs to feel the buffer with the result of the deletion for the send phase */
+	     2.needs to fill the buffer with the result of the deletion for the send phase */
 int do_delete_mail() {}
 
 /* TODO: 1.create the mail
-	     2.needs to feel the buffer with the result of the compose for the send phase */
+	     2.needs to fill the buffer with the result of the compose for the send phase */
 int do_compose() {}
 
 /* TODO: 1.check if user is online and prepare chatmessage in chatBuffer for send phase
 	     2.if not online - compose mail */
 int do_chat_message_send() {}
 
-int do_quit(User *user){
+void remove_fd_from_fd_sets(int fd, fd_set *readfds, fd_set *writefds, fd_set *errorfds) {
+	if (readfds != NULL && FD_ISSET(fd, readfds)) {
+		FD_CLR(fd, readfds);
+	}
+
+	if (writefds != NULL && FD_ISSET(fd, writefds)) {
+		FD_CLR(fd, writefds);
+	}
+
+	if (errorfds != NULL && FD_ISSET(fd, errorfds)) {
+		FD_CLR(fd, errorfds);
+	}
+}
+
+void disconnect_user(User *user) {
 	close(user->chatSocket);
 	close(user->mainSocket);
 	user->isOnline = 0;
-	free_user_buffer(&(user->mainBuffer));
-	free_user_buffer(&(user->chatBuffer));
+	user->mainSocket = -1;
+	user->chatSocket = -1;
+	free_non_blocking_message(&(user->mainBuffer));
+	free_non_blocking_message(&(user->chatBuffer));
 }
 
-int recv_header(int userSocket, UserBuffer *userBuffer){
-	unsigned char header;
-	int res;
-	int bytesToRecieve = 1;
-
-	res = recv(userSocket, &header, bytesToRecieve, 0);
-	/* TODO: check for -1 or */
-	userBuffer->message.messageType = header & MESSAGE_TYPE_MASK;
-	userBuffer->message.messageSize = (header & MESSAGE_SIZE_MASK)>>5;
-
-	return (0);
-}
-
-int recv_partial_message(int userSocket, UserBuffer *userBuffer){
-	int bytesToRecieve, res;
-
-	bytesToRecieve = userBuffer->bytesLeftToComplete;
-	res = recv(userSocket, userBuffer->message.data + userBuffer->offset, bytesToRecieve, 0);
-	if (res == -1){/* TODO: errors on -1 or 0*/
-		return ERROR;
-	} else if (res == 0){ /* TODO need to return new flag SOCKET_CLOSED */
-
-	} else {
-		(userBuffer->bytesLeftToComplete) -= res;
-		(userBuffer->bytesLeftToComplete) += res;
-		if (userBuffer->bytesLeftToComplete == 0){
-			userBuffer->needMoreInfo = 0;
-		}
-	}
-
-	return 0;
+void do_quit(User *user){
+	disconnect_user(user);
 }
 
 /* TODO: need to send in phases - first headers, then data. need to know in which phase */
-int send_partial_message(int userSocket, UserBuffer *userBuffer){
+int send_partial_message(int userSocket, NonBlockingMessage *userBuffer){
 	int bytesToSend, res;
 
 	bytesToSend = userBuffer->bytesLeftToComplete;
 }
 
-void prepare_buffer(UserBuffer *userBuffer, int messageSize) {
-	userBuffer->message.size = messageSize;
-	userBuffer->bytesLeftToComplete = messageSize;
-	userBuffer->needMoreInfo = 1;
-	userBuffer->offset = 0;
-}
+void handle_error_fds(fd_set *errorfds, User *users, UnrecognizedUser *unrecognizedUsers, int usersAmount,
+					int unrecognizedUsersAmount) {
+	int i;
 
-/* change the UserBuffer to know what to get next according to the size or nothing*/
-void prepare_for_next_receive(MessageSize messageSize, UserBuffer *userBuffer){
-	if (messageSize == TwoBytes){
-		prepare_buffer(userBuffer, 2);
-	} else if (messageSize == ThreeBytes){
-		prepare_buffer(userBuffer, 3);
-	} else if (messageSize == VariedSize){
-		prepare_buffer(userBuffer, sizeof(int));
+	for (i = 0; i < usersAmount; i++) {
+		if (FD_ISSET(users[i].mainSocket, errorfds) || FD_ISSET(users[i].chatSocket, errorfds)) {
+			users[i].isOnline = 0;
+			close(users[i].mainSocket);
+			close(users[i].chatSocket);
+			users[i].mainSocket = -1;
+			users[i].chatSocket = -1;
+			free_non_blocking_message(&(users[i].mainBuffer));
+			free_non_blocking_message(&(users[i].chatBuffer));
+			/* TODO: maybe remove also from readfds and writefds */
+		}
+	}
+
+	for (i = 0; i < unrecognizedUsersAmount; i++) {
+		if (FD_ISSET(unrecognizedUsers[i].socket, errorfds)) {
+			close(unrecognizedUsers[i].socket);
+			unrecognizedUsers[i].socket = -1;
+			unrecognizedUsers[i].isActive = 0;
+			free_non_blocking_message(&(unrecognizedUsers[i].buffer));
+			/* TODO: maybe remove also from readfds and writefds */
+		}
 	}
 }
-
 
 int handle_read_fds(fd_set *readfds, int listenSocket, User *users, int userAmounts,
 		UnrecognizedUser **unrecognizedUsers, int *unreconizedUsersAmount, int *unrecognizedUsersSize) {
 	int i, res;
 	MessageType messageType;
 
-	/* listen socket was signaled */
-	if (FD_ISSET(listenSocket, readfds)){
-		if (do_accept(listenSocket, unrecognizedUsers, unrecognizedUsersSize, unreconizedUsersAmount) == ERROR){
-			/* TODO: failure action		}
-			 *  */
+	/* Check if listen socket was signaled */
+	if (FD_ISSET(listenSocket, readfds)) {
+		if (do_accept(listenSocket, unrecognizedUsers, unrecognizedUsersSize, unreconizedUsersAmount) == ERROR) {
+			return (ERROR);
 		}
 	}
-	for (i = 0; i < userAmounts; i++){
-		if ((users[i].isOnline) && (FD_ISSET(users[i].mainSocket, readfds))){
-			if (!(users[i].mainBuffer.needMoreInfo)){  /* the start of the message - only header */
-				res = recv_header(users[i].mainSocket, &(users[i].mainBuffer));
-				prepare_for_next_receive( users[i].mainBuffer.message.messageSize, &(users[i].mainBuffer));
-				/* TODO failure action */
-			} else {
-				res = recv_partial_message(users[i].mainSocket, &(users[i].mainBuffer));
-				/* it can change the needMoreInfo to false */
-			}
+
+	for (i = 0; i < userAmounts; i++) {
+		if ((users[i].isOnline) && (FD_ISSET(users[i].mainSocket, readfds))) {
+			res = recv_non_blocking_message(users[i].mainSocket, &(users[i].mainBuffer));
+			/* TODO : disconnect user on failure */
+			/* TODO : remove his sockets from the sets */
+
 			if (!users[i].mainBuffer.needMoreInfo){
 				messageType = users[i].mainBuffer.message.messageType;
-				if (messageType == Quit){
-					res = do_quit(&(users[i]));
-				} else if (messageType == ShowInbox){
+				if (messageType == Quit) {
+					do_quit(&(users[i]));
+				} else if (messageType == ShowInbox) {
 					res = do_show_inbox();
-				} else if (messageType == GetMail){
+				} else if (messageType == GetMail) {
 					res = do_get_mail();
-				} else if (messageType == GetAttachment){
+				} else if (messageType == GetAttachment) {
 					res = do_get_attachment();
-				} else if (messageType == DeleteMail){
+				} else if (messageType == DeleteMail) {
 					res = do_delete_mail();
-				} else if (messageType == Compose){
+				} else if (messageType == Compose) {
 					res = do_compose();
-				} else if (messageType == ChatMessageSend){
+				} else if (messageType == ChatMessageSend) {
 					res = do_chat_message_send();
 				}
 			}
 		}
 	}
 
-	for (i = 0; i < *unreconizedUsersAmount; i++){
+	for (i = 0; i < *unreconizedUsersAmount; i++) {
 		/* TODO: add CredentialsMain, CredentialsChat support */
 	}
+
+	return (0);
 }
 
 int handle_send_fds(fd_set *writefds, User *users, int userAmounts,
@@ -515,42 +513,50 @@ int handle_send_fds(fd_set *writefds, User *users, int userAmounts,
 	int i;
 
 	for (i = 0; i < userAmounts; i++){
-		if (FD_ISSET(users[i].mainSocket, writefds)  && users[i].mainBuffer.bytesLeftToComplete > 0){
+		if (FD_ISSET(users[i].mainSocket, writefds)  && users[i].mainBuffer.bytesLeftToComplete > 0) {
 			send_partial_message(users[i].mainSocket, &(users[i].mainBuffer));
 		}
-		if (FD_ISSET(users[i].chatSocket, writefds)  && users[i].chatBuffer.bytesLeftToComplete > 0){
+
+		if (FD_ISSET(users[i].chatSocket, writefds)  && users[i].chatBuffer.bytesLeftToComplete > 0) {
 			send_partial_message(users[i].chatSocket, &(users[i].chatBuffer));
 		}
 	}
 
-	for (i = 0; i < unreconizedUsersAmount; i++){
+	for (i = 0; i < unreconizedUsersAmount; i++) {
 		if (unrecognizedUsers[i].isActive &&
-			FD_ISSET(unrecognizedUsers[i].socket, writefds) && unrecognizedUsers[i].buffer.bytesLeftToComplete > 0){
+			FD_ISSET(unrecognizedUsers[i].socket, writefds) && unrecognizedUsers[i].buffer.bytesLeftToComplete > 0) {
 			send_partial_message(unrecognizedUsers[i].socket, &(unrecognizedUsers[i].buffer));
 		}
 	}
 }
 
+void init_FD_sets(fd_set *readfds, fd_set *writefds, fd_set *errorfds) {
+	FD_ZERO(readfds);
+	FD_ZERO(writefds);
+	FD_ZERO(errorfds);
+}
+
+/* Preparing the file descriptors sets for the select */
 void refresh_sets(fd_set *readfds, fd_set *writefds, fd_set *errorfds, int *maxSocket,
 				int listenSocket, User *users, int userAmount,
 				UnrecognizedUser *unrecognizedUsers, int unrecognizedUsersAmount) {
 	int i;
 	*maxSocket = listenSocket;
 
-	FD_ZERO(readfds);
-	FD_ZERO(writefds);
-	FD_ZERO(errorfds);
+	init_FD_sets(readfds, writefds, errorfds);
 
 	FD_SET(listenSocket, readfds);
 
 	for (i = 0; i < userAmount; i++) {
 		if (users[i].isOnline) {
-			if (users[i].mainSocket > *maxSocket){
+			if (users[i].mainSocket > *maxSocket) {
 				*maxSocket = users[i].mainSocket;
 			}
-			if (users[i].chatSocket > *maxSocket){
+
+			if (users[i].chatSocket > *maxSocket) {
 				*maxSocket = users[i].chatSocket;
 			}
+
 			FD_SET(users[i].mainSocket, readfds);
 			FD_SET(users[i].mainSocket, writefds);
 			FD_SET(users[i].chatSocket, writefds);
@@ -558,11 +564,13 @@ void refresh_sets(fd_set *readfds, fd_set *writefds, fd_set *errorfds, int *maxS
 			FD_SET(users[i].chatSocket, errorfds);
 		}
 	}
+
 	for (i = 0; i < unrecognizedUsersAmount; i++) {
-		if (unrecognizedUsers[i].isActive){
-			if (unrecognizedUsers[i].socket > *maxSocket){
+		if (unrecognizedUsers[i].isActive) {
+			if (unrecognizedUsers[i].socket > *maxSocket) {
 					*maxSocket = unrecognizedUsers[i].socket;
 				}
+
 				FD_SET(unrecognizedUsers[i].socket, readfds);
 				FD_SET(unrecognizedUsers[i].socket, writefds);
 				FD_SET(unrecognizedUsers[i].socket, errorfds);
@@ -599,45 +607,49 @@ int main(int argc, char** argv) {
 		port = (short) atoi(argv[2]);
 	}
 
-	res = initialliaze_users_array(&usersAmount, &users, argv[1]);
+	res = initialize_users_array(&usersAmount, &users, argv[1]);
 	if (res == ERROR) {
 		print_error_message(INIT_USER_ARR_FAILED);
 		print_error();
 		return(ERROR);
 	}
 
+	res = initialize_unrecognized_users_array(&unrecognizedUsers);
+	if (res == ERROR) {
+		free_users_array(users, usersAmount);
+		return (ERROR);
+	}
+	unrecognizedUsersInUse = 0;
+	unrecognizedUsersSize = 1;
+
 	if (initiallize_listen_socket(&listenSocket, port) == ERROR) {
 		print_error();
 		free_users_array(users, usersAmount);
+		free_unrecognized_users_array(unrecognizedUsers, unrecognizedUsersSize);
 		return (ERROR);
 	}
 
 	tv.tv_sec = 0;
-	tv.tv_usec = 500000;
-
-	unrecognizedUsers = (UnrecognizedUser*)calloc(1, sizeof(UnrecognizedUser));
-	if (unrecognizedUsers == NULL) {
-		/* TODO : free unrecognized users */
-		print_error();
-		return (ERROR);
-	}
-	memset(&(unrecognizedUsers[0].buffer), 0, sizeof(UserBuffer));
-	unrecognizedUsersInUse = 0;
-	unrecognizedUsersSize = 1;
-
+	tv.tv_usec = SELECT_UTIMEVAL;
 
 	do {
 		refresh_sets(&readfds, &writefds, &errorfds, &maxfd, listenSocket, users, usersAmount,
 					unrecognizedUsers, unrecognizedUsersSize);
 		res = select(maxfd, &readfds, &writefds, &errorfds, &tv);
 		res = handle_return_value(res);
-
 		if (res == ERROR) {
 			break;
 		}
+
 		handle_error_fds(&errorfds, users, unrecognizedUsers, usersAmount, unrecognizedUsersSize);
-		handle_read_fds(&readfds, listenSocket, users, usersAmount, &unrecognizedUsers, &unrecognizedUsersInUse,
-					&unrecognizedUsersSize);
+
+		res = handle_read_fds(&readfds, listenSocket, users, usersAmount, &unrecognizedUsers, &unrecognizedUsersInUse,
+				&unrecognizedUsersSize);
+		res = handle_return_value(res);
+		if (res == ERROR) {
+			break;
+		}
+
 		handle_send_fds(&writefds, users, usersAmount, unrecognizedUsers, unrecognizedUsersInUse);
 
 	} while (1);
@@ -645,10 +657,6 @@ int main(int argc, char** argv) {
 
 
 	do {
-
-
-
-
 		/* Sending welcome message */
 		res = send_message_from_string(clientSocket, WELLCOME_MESSAGE);
 		res = handle_return_value(res);
@@ -786,6 +794,8 @@ int main(int argc, char** argv) {
 	} while (1);
 
 	/* Releasing resources */
+	init_FD_sets(&readfds, &writefds, &errorfds);
+	free_unrecognized_users_array(unrecognizedUsers, unrecognizedUsersSize);
 	free_users_array(users, usersAmount);
 	close(listenSocket);
 	free_message(&message);

@@ -53,6 +53,13 @@ void free_message(Message *message) {
 	memset(message, 0, sizeof(Message));
 }
 
+void free_non_blocking_message(NonBlockingMessage *userBuffer) {
+	userBuffer->bytesLeftToComplete = 0;
+	free_message(&(userBuffer->message));
+	userBuffer->needMoreInfo = 0;
+	userBuffer->offset = 0;
+}
+
 /* Sends an attachment to stream */
 int send_attachment(int targetSocket, Attachment *attachment) {
 	int i, bytesToSend, netAttachmentSize, res;
@@ -154,6 +161,11 @@ int send_message(int targetSocket, Message *message) {
 	return send_message_with_attachments(targetSocket, message, NULL);
 }
 
+void set_message_header(Message *message, unsigned char header) {
+	message->messageType = header & MESSAGE_TYPE_MASK;
+	message->messageSize = (header & MESSAGE_SIZE_MASK)>>5;
+}
+
 int recv_message(int sourceSocket, Message *message) {
 
 	int bytesToRecv, netMessageSize;
@@ -171,8 +183,7 @@ int recv_message(int sourceSocket, Message *message) {
 	if (res != 0) {
 		return (res);
 	} else {
-		message->messageType = header & MESSAGE_TYPE_MASK;
-		message->messageSize = (header & MESSAGE_SIZE_MASK)>>5;
+		set_message_header(message, header);
 		len = bytesToRecv;
 	}
 
@@ -207,6 +218,76 @@ int recv_message(int sourceSocket, Message *message) {
 	}
 
 	return (len == (message->size + 1) ? 0 : ERROR_LOGICAL);
+}
+
+int recv_header(int userSocket, NonBlockingMessage *nonBlockingMessage){
+	unsigned char header;
+	int res;
+	int bytesToRecieve = 1;
+
+	res = recv(userSocket, &header, bytesToRecieve, 0);
+	if (res == -1) {
+		return (ERROR);
+	} else if (res == 0) {
+		/* TODO: what ? */
+	} else if (res == bytesToRecieve) {
+		set_message_header(&(nonBlockingMessage->message), header);
+		return (0);
+	} else {
+		return (ERROR);
+	}
+}
+
+int recv_partial_message(int userSocket, NonBlockingMessage *userBuffer){
+	int bytesToRecieve, res;
+
+	bytesToRecieve = userBuffer->bytesLeftToComplete;
+	res = recv(userSocket, userBuffer->message.data + userBuffer->offset, bytesToRecieve, 0);
+	if (res == -1){/* TODO: errors on -1 or 0*/
+		return ERROR;
+	} else if (res == 0){ /* TODO need to return new flag SOCKET_CLOSED */
+
+	} else {
+		(userBuffer->bytesLeftToComplete) -= res;
+		(userBuffer->bytesLeftToComplete) += res;
+		if (userBuffer->bytesLeftToComplete == 0){
+			userBuffer->needMoreInfo = 0;
+		}
+	}
+
+	return 0;
+}
+
+void prepare_buffer(NonBlockingMessage *userBuffer, int messageSize) {
+	userBuffer->message.size = messageSize;
+	userBuffer->bytesLeftToComplete = messageSize;
+	userBuffer->needMoreInfo = 1;
+	userBuffer->offset = 0;
+}
+
+/* change the NonBlockingMessage to know what to get next according to the size or nothing*/
+void prepare_for_next_receive(MessageSize messageSize, NonBlockingMessage *userBuffer){
+	if (messageSize == TwoBytes){
+		prepare_buffer(userBuffer, 2);
+	} else if (messageSize == ThreeBytes){
+		prepare_buffer(userBuffer, 3);
+	} else if (messageSize == VariedSize){
+		prepare_buffer(userBuffer, sizeof(int));
+	}
+}
+
+int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nonBlockingMessage) {
+	int res;
+
+	if (!(nonBlockingMessage->needMoreInfo)) {
+		/* The start of the message - only header */
+		res = recv_header(sourceSocket, nonBlockingMessage);
+		prepare_for_next_receive(nonBlockingMessage->message.messageSize, nonBlockingMessage);
+		/* TODO failure action */
+	} else {
+		/* This can change the needMoreInfo to false */
+		res = recv_partial_message(sourceSocket, nonBlockingMessage);
+	}
 }
 
 int recv_typed_message(int socket, Message *message,
@@ -334,7 +415,7 @@ int send_message_from_credentials(int socket, int chatSocket, char* userName, ch
 	Message message;
 	int res;
 
-	if (prepare_message_from_credentials(userName, password, &message,0) != 0) {
+	if (prepare_message_from_credentials(userName, password, &message, 0) != 0) {
 		free_message(&message);
 		return (ERROR);
 	}
@@ -343,7 +424,8 @@ int send_message_from_credentials(int socket, int chatSocket, char* userName, ch
 		return (res);
 	}
 
-	if (prepare_message_from_credentials(userName, password, &message,1) != 0) {
+	free_message(&message);
+	if (prepare_message_from_credentials(userName, password, &message, 1) != 0) {
 		free_message(&message);
 		return (ERROR);
 	}

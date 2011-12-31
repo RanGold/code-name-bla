@@ -258,7 +258,7 @@ int main(int argc, char** argv) {
 	}
 
 	chatSocket = socket(PF_INET, SOCK_STREAM, 0);
-	res = connect(chatSocket, servinfo->ai_adai_addrdr, servinfo->ai_addrlen);
+	res = connect(chatSocket, servinfo->ai_addr, servinfo->ai_addrlen);
 	if (res == ERROR) {
 		print_error();
 		freeaddrinfo(servinfo);
@@ -287,7 +287,6 @@ int main(int argc, char** argv) {
 		free(stringMessage);
 	}
 
-
 	/* Initializing structs */
 	memset(&mail, 0, sizeof(Mail));
 	memset(&attachment, 0, sizeof(Attachment));
@@ -305,7 +304,7 @@ int main(int argc, char** argv) {
 					scanf("Password: %s", password)) != 2) {
 				print_error_message(CREDENTIALS_USAGE_MESSAGE);
 			} else {
-				res = send_message_from_credentials(clientSocket, userName, password);
+				res = send_message_from_credentials(clientSocket, chatSocket, userName, password);
 				res = handle_return_value(res);
 				if (res == ERROR) {
 					break;
