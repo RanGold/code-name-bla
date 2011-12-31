@@ -69,14 +69,27 @@ typedef struct {
 	unsigned char *data;
 } Message;
 
+typedef struct {
+	Message message;
+	int offset;
+	int needMoreInfo;
+	int bytesLeftToComplete;
+} NonBlockingMessage;
+
 /* Frees the message struct */
 void free_message(Message *message);
+
+/* Frees the NonBlockingMessage struct */
+void free_non_blocking_message(NonBlockingMessage *userBuffer);
 
 /* Send a message to the stream */
 int send_message(int targetSocket, Message *message);
 
 /* Receive a message from the stream */
 int recv_message(int sourceSocket, Message *message);
+
+/* Receive a non blocking message from the stream */
+int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nonBlockingMessage);
 
 /* prepares a message from string */
 int prepare_message_from_string(char* str, Message* message);
