@@ -11,7 +11,7 @@ void print_error_message(char* message) {
 }
 
 int handle_return_value(int res) {
-
+	/* TODO: HANDLE CRIRITCAL ERROR */
 	if (res == ERROR) {
 		print_error();
 	} else if (res == ERROR_LOGICAL) {

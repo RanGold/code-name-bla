@@ -53,11 +53,10 @@ void free_message(Message *message) {
 	memset(message, 0, sizeof(Message));
 }
 
-void free_non_blocking_message(NonBlockingMessage *userBuffer) {
-	userBuffer->bytesLeftToComplete = 0;
-	free_message(&(userBuffer->message));
-	userBuffer->needMoreInfo = 0;
-	userBuffer->offset = 0;
+void free_non_blocking_message(NonBlockingMessage *nbMessage) {
+	free_message(&(nbMessage->message));
+	memset(nbMessage, 0, sizeof(NonBlockingMessage));
+	nbMessage->isPartial = 1;
 }
 
 /* Sends an attachment to stream */
@@ -88,6 +87,11 @@ int send_attachment(int targetSocket, Attachment *attachment) {
 	return 0;
 }
 
+unsigned char get_message_header(Message *message) {
+	return ((((unsigned char) (message->messageType))
+			| (((unsigned char) (message->messageSize)) << 5)));
+}
+
 /* Send a message to the stream with attachments */
 int send_message_with_attachments(int targetSocket, Message *message,
 		Mail *mail) {
@@ -98,8 +102,7 @@ int send_message_with_attachments(int targetSocket, Message *message,
 
 	/* Sending header */
 	bytesToSend = 1;
-	header = (((unsigned char) (message->messageType))
-			| (((unsigned char) (message->messageSize)) << 5));
+	header = get_message_header(message);
 	res = send_all(targetSocket, &header, &bytesToSend);
 
 	/* In case of an error we stop before sending the data */
@@ -179,7 +182,7 @@ int recv_message(int sourceSocket, Message *message) {
 	bytesToRecv = 1;
 	res = recv_all(sourceSocket, &header, &bytesToRecv);
 
-	/* In case of an error we stop before sending the data */
+	/* In case of an error we stop before receiving the data */
 	if (res != 0) {
 		return (res);
 	} else {
@@ -209,6 +212,10 @@ int recv_message(int sourceSocket, Message *message) {
 	/* Receiving data */
 	if (bytesToRecv > 0) {
 		message->data = calloc(message->size, 1);
+		if (message->data == NULL) {
+			return (ERROR);
+		}
+
 		res = recv_all(sourceSocket, message->data, &bytesToRecv);
 		if (res != 0) {
 			return (res);
@@ -220,74 +227,251 @@ int recv_message(int sourceSocket, Message *message) {
 	return (len == (message->size + 1) ? 0 : ERROR_LOGICAL);
 }
 
-int recv_header(int userSocket, NonBlockingMessage *nonBlockingMessage){
-	unsigned char header;
+int send_header(int targetSocket, NonBlockingMessage *nbMessage){
 	int res;
-	int bytesToRecieve = 1;
+	int bytesToSend = 1;
+	unsigned char header = get_message_header(&(nbMessage->message));
 
-	res = recv(userSocket, &header, bytesToRecieve, 0);
+	/* No signal raised on error closed socket, instead it is recognized by return value */
+	res = send(targetSocket, &header, bytesToSend, MSG_NOSIGNAL);
 	if (res == -1) {
 		return (ERROR);
 	} else if (res == 0) {
-		/* TODO: what ? */
-	} else if (res == bytesToRecieve) {
-		set_message_header(&(nonBlockingMessage->message), header);
+		return (ERROR_SOCKET_CLOSED);
+	} else if (res == bytesToSend) {
+		nbMessage->headerHandled = 1;
 		return (0);
 	} else {
-		return (ERROR);
+		return (ERROR_LOGICAL);
 	}
 }
 
-int recv_partial_message(int userSocket, NonBlockingMessage *userBuffer){
-	int bytesToRecieve, res;
+int send_partial_message(int targetSocket, NonBlockingMessage *nbMessage, Mail *mail) {
+	int bytesToSend, res, netMessageSize;
 
-	bytesToRecieve = userBuffer->bytesLeftToComplete;
-	res = recv(userSocket, userBuffer->message.data + userBuffer->offset, bytesToRecieve, 0);
-	if (res == -1){/* TODO: errors on -1 or 0*/
-		return ERROR;
-	} else if (res == 0){ /* TODO need to return new flag SOCKET_CLOSED */
-
+	if (nbMessage->message.messageSize == VariedSize && !(nbMessage->sizeHandled)) {
+		bytesToSend = - nbMessage->dataOffset;
+		netMessageSize = htonl(nbMessage->message.size);
+		res = send(targetSocket, ((unsigned char*)&netMessageSize) + sizeof(netMessageSize) + nbMessage->dataOffset,
+				bytesToSend, MSG_NOSIGNAL);
 	} else {
-		(userBuffer->bytesLeftToComplete) -= res;
-		(userBuffer->bytesLeftToComplete) += res;
-		if (userBuffer->bytesLeftToComplete == 0){
-			userBuffer->needMoreInfo = 0;
+		bytesToSend = nbMessage->message.size - nbMessage->dataOffset;
+		res = send(targetSocket, nbMessage->message.data + nbMessage->dataOffset,
+						bytesToSend, MSG_NOSIGNAL);
+	}
+	/* TODO: handle files */
+	if (res == -1) {
+		return (ERROR);
+	} else if (res == 0) {
+		return (ERROR_SOCKET_CLOSED);
+	} else {
+		(nbMessage->dataOffset) += res;
+
+		/* Checking if the varied size was received */
+		if ((nbMessage->message.messageSize == VariedSize) && (nbMessage->sizeHandled == 0)) {
+			/* Getting message size */
+			memcpy(&netMessageSize, nbMessage->message.data, sizeof(netMessageSize));
+			free(nbMessage->message.data);
+			nbMessage->message.data = NULL;
+			nbMessage->message.size = ntohl(netMessageSize);
+			nbMessage->sizeHandled = 1;
+			return (prepare_data_buffer(nbMessage, nbMessage->message.size));
+		} else if (nbMessage->message.size == nbMessage->dataOffset) {
+			nbMessage->isPartial = 0;
 		}
 	}
 
 	return 0;
 }
 
-void prepare_buffer(NonBlockingMessage *userBuffer, int messageSize) {
-	userBuffer->message.size = messageSize;
-	userBuffer->bytesLeftToComplete = messageSize;
-	userBuffer->needMoreInfo = 1;
-	userBuffer->offset = 0;
+/* Send a non blocking message to the stream with attachments */
+int send_non_blocking_message_with_attachments(int targetSocket, NonBlockingMessage *nbMessage,
+		Mail *mail) {
+	int bytesToSend;
+	int res, i, netMessageSize;
+	unsigned int len = 0;
+
+
+	if (!(nbMessage->headerHandled)) {
+		/* Receiving the beginning of the message - only header */
+		res = send_header(targetSocket, nbMessage);
+
+		if (nbMessage->message.messageSize == VariedSize) {
+			nbMessage->dataOffset = -sizeof(nbMessage->message.size);
+		}
+	} else if (nbMessage->isPartial) {
+		/* This can change the isPartial to false, now the header is already sent */
+		res = send_partial_message(targetSocket, nbMessage, mail);
+	} else {
+		/* Invalid state */
+		res = ERROR;
+	}
+
+	/* Sending data size (if needed) */
+	if (message->messageSize == VariedSize) {
+		bytesToSend = sizeof(int);
+		netMessageSize = htonl(message->size);
+		res = send_all(targetSocket, (unsigned char*) &(netMessageSize),
+				&bytesToSend);
+		if (res == ERROR) {
+			free_message(message);
+			return (ERROR);
+		}
+	}
+
+	/* Sending data (if needed) */
+	if (message->messageSize != ZeroSize) {
+		bytesToSend = message->size;
+		if (mail != NULL) {
+			for (i = 0; i < mail->numAttachments; i++) {
+				bytesToSend -= mail->attachments[i].size + sizeof(int);
+			}
+		}
+		res = send_all(targetSocket, message->data, &bytesToSend);
+		if (res == ERROR) {
+			free_message(message);
+			return (ERROR);
+		} else {
+			len += bytesToSend;
+		}
+
+		/* Checking if there are files to send */
+		if (mail != NULL) {
+			for (i = 0; i < mail->numAttachments; i++) {
+				res = send_attachment(targetSocket, mail->attachments + i);
+				if (res == ERROR) {
+					free_message(message);
+					return (ERROR);
+				} else {
+					len += mail->attachments[i].size + sizeof(int);
+				}
+			}
+		}
+	}
+
+	res = (len == (message->size + 1) ? 0 : ERROR_LOGICAL);
+	free_message(message);
+	return (res);
 }
 
-/* change the NonBlockingMessage to know what to get next according to the size or nothing*/
-void prepare_for_next_receive(MessageSize messageSize, NonBlockingMessage *userBuffer){
-	if (messageSize == TwoBytes){
-		prepare_buffer(userBuffer, 2);
-	} else if (messageSize == ThreeBytes){
-		prepare_buffer(userBuffer, 3);
-	} else if (messageSize == VariedSize){
-		prepare_buffer(userBuffer, sizeof(int));
+int send_non_blocking_message(int targetSocket, NonBlockingMessage *nbMessage,
+		Mail *mail) {
+	return send_non_blocking_message_with_attachments(targetSocket, nbMessage, NULL);
+}
+
+int recv_header(int sourceSocket, NonBlockingMessage *nbMessage){
+	unsigned char header;
+	int res;
+	int bytesToRecieve = 1;
+
+	res = recv(sourceSocket, &header, bytesToRecieve, 0);
+	if (res == -1) {
+		return (ERROR);
+	} else if (res == 0) {
+		return (ERROR_SOCKET_CLOSED);
+	} else if (res == bytesToRecieve) {
+		set_message_header(&(nbMessage->message), header);
+		nbMessage->headerHandled = 1;
+		return (0);
+	} else {
+		return (ERROR_LOGICAL);
 	}
 }
 
-int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nonBlockingMessage) {
+int prepare_data_buffer(NonBlockingMessage *nbMessage, int size) {
+	nbMessage->message.size = size;
+	nbMessage->isPartial = (size == 0 ? 0 : 1);
+	nbMessage->dataOffset = 0;
+
+	if (nbMessage->message.size > 0) {
+		nbMessage->message.data = calloc(nbMessage->message.size, 1);
+		if (nbMessage->message.data == NULL) {
+			return (ERROR);
+		}
+	}
+
+	return (0);
+}
+
+/* Change the NonBlockingMessage to know what to get next according to the size */
+int prepare_for_next_receive(NonBlockingMessage *nbMessage) {
 	int res;
 
-	if (!(nonBlockingMessage->needMoreInfo)) {
-		/* The start of the message - only header */
-		res = recv_header(sourceSocket, nonBlockingMessage);
-		prepare_for_next_receive(nonBlockingMessage->message.messageSize, nonBlockingMessage);
-		/* TODO failure action */
-	} else {
-		/* This can change the needMoreInfo to false */
-		res = recv_partial_message(sourceSocket, nonBlockingMessage);
+	switch (nbMessage->message.messageSize) {
+	case ZeroSize:
+		res = prepare_data_buffer(nbMessage, 0);
+		nbMessage->sizeHandled = 1;
+		break;
+	case TwoBytes:
+		res = prepare_data_buffer(nbMessage, 2);
+		nbMessage->sizeHandled = 1;
+		break;
+	case ThreeBytes:
+		res = prepare_data_buffer(nbMessage, 3);
+		nbMessage->sizeHandled = 1;
+		break;
+	case VariedSize:
+		res = prepare_data_buffer(nbMessage, sizeof(int));
+		nbMessage->sizeHandled = 0;
+		break;
+	default:
+		res = ERROR_LOGICAL;
 	}
+
+	return (res);
+}
+
+int recv_partial_message(int sourceSocket, NonBlockingMessage *nbMessage) {
+	int bytesToRecieve, res, netMessageSize;
+
+	bytesToRecieve = nbMessage->message.size - nbMessage->dataOffset;
+	res = recv(sourceSocket, nbMessage->message.data + nbMessage->dataOffset, bytesToRecieve, 0);
+	if (res == -1) {
+		return (ERROR);
+	} else if (res == 0) {
+		return (ERROR_SOCKET_CLOSED);
+	} else {
+		(nbMessage->dataOffset) += res;
+
+		if (nbMessage->message.size == nbMessage->dataOffset) {
+			/* Checking if the varied size was received */
+			if ((nbMessage->message.messageSize == VariedSize) && (nbMessage->sizeHandled == 0)) {
+				/* Getting message size */
+				memcpy(&netMessageSize, nbMessage->message.data, sizeof(netMessageSize));
+				free(nbMessage->message.data);
+				nbMessage->message.data = NULL;
+				nbMessage->message.size = ntohl(netMessageSize);
+				nbMessage->sizeHandled = 1;
+				return (prepare_data_buffer(nbMessage, nbMessage->message.size));
+			} else {
+				nbMessage->isPartial = 0;
+			}
+		}
+	}
+
+	return 0;
+}
+
+int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nbMessage) {
+	int res;
+
+	if (!(nbMessage->headerHandled)) {
+		/* Receiving the beginning of the message - only header */
+		res = recv_header(sourceSocket, nbMessage);
+
+		/* Preparing the message according to the buffer */
+		if (res == 0) {
+			res = prepare_for_next_receive(nbMessage);
+		}
+	} else if (nbMessage->isPartial) {
+		/* This can change the isPartial to false, now the header is already received */
+		res = recv_partial_message(sourceSocket, nbMessage);
+	} else {
+		/* Invalid state */
+		res = ERROR;
+	}
+
+	return (res);
 }
 
 int recv_typed_message(int socket, Message *message,
@@ -391,6 +575,13 @@ int prepare_message_from_credentials(char *userName, char *password,
 	}
 }
 
+void set_empty_message(NonBlockingMessage* nbMessage, MessageType type) {
+	free_non_blocking_message(nbMessage);
+	nbMessage->message.messageType = type;
+	nbMessage->message.messageSize = ZeroSize;
+	nbMessage->message.size = 0;
+}
+
 int send_empty_message(int socket, MessageType type) {
 
 	Message message;
@@ -441,7 +632,7 @@ int prepare_credentials_from_message(Message* message, char* userName, char* pas
 
 	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 1];
 
-	if (message->messageType != CredentialsMain) {
+	if (message->messageType != CredentialsMain && message->messageType != CredentialsChat) {
 		free_message(message);
 		return (ERROR);
 	}
@@ -456,12 +647,12 @@ int prepare_credentials_from_message(Message* message, char* userName, char* pas
 	}
 }
 
-int send_credentials_deny_message(int socket) {
-	return (send_empty_message(socket, CredentialsDeny));
+void prepare_credentials_deny_message(NonBlockingMessage* nbMessage) {
+	set_empty_message(nbMessage, CredentialsDeny);
 }
 
-int send_credentials_approve_message(int socket) {
-	return (send_empty_message(socket, CredentialsApprove));
+void prepare_credentials_approve_message(NonBlockingMessage* nbMessage) {
+	set_empty_message(nbMessage, CredentialsApprove);
 }
 
 int recv_credentials_result(int socket, int *isLoggedIn) {
