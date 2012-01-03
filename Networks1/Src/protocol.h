@@ -71,9 +71,10 @@ typedef struct {
 
 typedef struct {
 	Message message;
-	int offset;
-	int needMoreInfo;
-	int bytesLeftToComplete;
+	int dataOffset;
+	int isPartial;
+	int headerHandled;
+	int sizeHandled;
 } NonBlockingMessage;
 
 /* Frees the message struct */
@@ -109,11 +110,11 @@ int send_message_from_credentials(int socket, int chatSocket, char* userName, ch
 /* Preparing credentials data from a received message */
 int prepare_credentials_from_message(Message* message, char* userName, char* password);
 
-/* Send deny answer on the credentials sent */
-int send_credentials_deny_message(int socket);
+/* prepares deny answer on the credentials sent */
+void prepare_credentials_deny_message(NonBlockingMessage* nbMessage);
 
-/* Send accept answer on the credentials sent */
-int send_credentials_approve_message(int socket);
+/* prepares accept answer on the credentials sent */
+void prepare_credentials_approve_message(NonBlockingMessage* nbMessage);
 
 /* Receive credentials approve or deny only */
 int recv_credentials_result(int socket, int *isLoggedIn);
