@@ -419,11 +419,11 @@ void do_handle_credentials(UnrecognizedUser *unrecognizedUser, User* users, int 
 
 	if (curUser == NULL) {
 		if (unrecognizedUser->buffer.message.messageType == CredentialsMain) {
-			prepare_credentials_deny_message(&(unrecognizedUser->buffer.message));
+			prepare_credentials_deny_message(&(unrecognizedUser->buffer));
 		}
 	} else {
 		if (unrecognizedUser->buffer.message.messageType == CredentialsMain) {
-			prepare_credentials_approve_message(&(curUser->mainBuffer.message));
+			prepare_credentials_approve_message(&(curUser->mainBuffer));
 			curUser->isOnline = 1;
 			curUser->mainSocket = unrecognizedUser->socket;
 		} else {
