@@ -298,6 +298,9 @@ int main(int argc, char** argv) {
 		if (strcmp(input, QUIT_MESSAGE) == 0) {
 			res = send_quit_message(clientSocket);
 			res = handle_return_value(res);
+
+			res = send_quit_message(chatSocket);
+			res = handle_return_value(res);
 			break;
 		} else if (!isLoggedIn) {
 			if ((sscanf(input, "User: %s", userName) +
