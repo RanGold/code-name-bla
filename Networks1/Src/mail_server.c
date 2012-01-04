@@ -497,18 +497,20 @@ void do_invalid_message(NonBlockingMessage *nbMessage) {
 /* Updates the unrecognized user status by its credential */
 void do_handle_credentials(UnrecognizedUser *unrecognizedUser, User* users, int usersAmount) {
 	User *curUser;
+	MessageType messageType;
 
+	messageType = unrecognizedUser->buffer.message.messageType;
 	curUser = check_credentials_message(users, usersAmount,
 			&(unrecognizedUser->buffer.message));
 
 	if (curUser == NULL || curUser->isOnline) {
-		if (unrecognizedUser->buffer.message.messageType == CredentialsMain) {
-			free_non_blocking_message(&(unrecognizedUser->buffer));
+		free_non_blocking_message(&(unrecognizedUser->buffer));
+		if (messageType == CredentialsMain) {
 			prepare_credentials_deny_message(&(unrecognizedUser->buffer));
 		}
 	} else {
 
-		if (unrecognizedUser->buffer.message.messageType == CredentialsMain) {
+		if (messageType == CredentialsMain) {
 			if (curUser->chatSocket != -1) {
 				curUser->isOnline = 1;
 				prepare_credentials_approve_message(&(curUser->mainBuffer));
