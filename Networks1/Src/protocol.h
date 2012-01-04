@@ -29,6 +29,7 @@ typedef struct {
 
 /* This enum is to represent the different kinds of messages sent on the protocol */
 typedef enum {
+	InvalidCommand,
 	String,
 	Quit,
 	CredentialsMain,
@@ -46,7 +47,6 @@ typedef enum {
 	DeleteApprove,
 	Compose,
 	SendApprove,
-	InvalidCommand,
 	ShowOnlineUsers,
 	OnlineUsers,
 	ChatMessageSend,
