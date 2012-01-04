@@ -75,6 +75,7 @@ typedef struct {
 	int isPartial;
 	int headerHandled;
 	int sizeHandled;
+	int messageInitialized;
 } NonBlockingMessage;
 
 /* Frees the message struct */
@@ -89,14 +90,17 @@ int send_message(int targetSocket, Message *message);
 /* Receive a message from the stream */
 int recv_message(int sourceSocket, Message *message);
 
+/* Send a non blocking message to the stream with attachments */
+int send_non_blocking_message_with_attachments(int targetSocket, NonBlockingMessage *nbMessage, Mail *mail);
+
+/* Send a non blocking message to the stream */
+int send_non_blocking_message(int targetSocket, NonBlockingMessage *nbMessage);
+
 /* Receive a non blocking message from the stream */
-int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nonBlockingMessage);
+int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nbMessage);
 
 /* prepares a message from string */
-int prepare_message_from_string(char* str, Message* message);
-
-/* Send a message from a string */
-int send_message_from_string (int socket, char *str);
+int prepare_message_from_string(char* str, NonBlockingMessage* nbMessage);
 
 /* Receive a string from a message */
 int recv_string_from_message (int socket, char **str);

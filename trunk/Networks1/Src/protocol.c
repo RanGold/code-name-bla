@@ -257,41 +257,37 @@ int send_header(int targetSocket, NonBlockingMessage *nbMessage){
 	}
 }
 
-/* TODO : delete
-	int i, bytesToSend, netAttachmentSize, res;
-	unsigned char buffer[FILE_CHUNK_SIZE];
-
-	bytesToSend = sizeof(int);
-	netAttachmentSize = htonl(attachment->size);
-	res = send_all(targetSocket, (unsigned char*) &(netAttachmentSize),
-			&bytesToSend);
-	if (res == ERROR) {
-		return ERROR;
-	}
-
-	res = fseek(attachment->file, 0, SEEK_SET);
-	for (i = 0; i < attachment->size; i += FILE_CHUNK_SIZE) {
-		bytesToSend = fread(buffer, 1, FILE_CHUNK_SIZE, attachment->file);
-		if ((bytesToSend != FILE_CHUNK_SIZE) && (bytesToSend != (attachment->size - i))) {
-			return ERROR;
-		}
-		res = send_all(targetSocket, buffer, &bytesToSend);
-		if (res == ERROR) {
-			return ERROR;
-		}
-	}
-
-	return 0;
- */
 int get_buffer_from_attachments(int offset, unsigned char *buffer, Mail *mail) {
-	int i, curOffset = 0;
+	int i, remainingSizeField, bufferLen, netAttachmentSize, curOffset = 0;
 
 	for (i = 0; i < mail->numAttachments; i++) {
 		curOffset += mail->attachments[i].size + sizeof(mail->attachments[i].size);
+		/* Checking if the offset is from the current file */
 		if (offset < curOffset) {
+			/* Calculating offset in current file */
+			curOffset -=  mail->attachments[i].size + sizeof(mail->attachments[i].size);
+			curOffset = offset - curOffset;
 
+			/* Checking if the size is needed */
+			remainingSizeField = sizeof(mail->attachments[i].size) - curOffset;
+			if (remainingSizeField > 0) {
+				netAttachmentSize = htonl(mail->attachments[i].size);
+				memcpy(buffer, ((unsigned char*)&(netAttachmentSize)) + sizeof(netAttachmentSize) - remainingSizeField, remainingSizeField);
+			} else {
+				remainingSizeField = 0;
+			}
+
+			fseek(mail->attachments[i].file, curOffset - remainingSizeField, SEEK_SET);
+			bufferLen = fread(buffer + remainingSizeField, 1, FILE_CHUNK_SIZE - remainingSizeField, mail->attachments[i].file);
+			if ((bufferLen != (FILE_CHUNK_SIZE - remainingSizeField)) && (bufferLen != (mail->attachments[i].size - (curOffset - remainingSizeField)))) {
+				return ERROR;
+			}
+
+			break;
 		}
 	}
+
+	return (bufferLen);
 }
 
 int send_partial_message(int targetSocket, NonBlockingMessage *nbMessage, Mail *mail) {
@@ -304,22 +300,24 @@ int send_partial_message(int targetSocket, NonBlockingMessage *nbMessage, Mail *
 		res = send(targetSocket, ((unsigned char*)&netMessageSize) + sizeof(netMessageSize) + nbMessage->dataOffset,
 				bytesToSend, MSG_NOSIGNAL);
 	} else {
-		bytesToSend = nbMessage->message.size - nbMessage->dataOffset;
 		attachmentsSize = calculate_attachemnts_size(mail);
+		bytesToSend = nbMessage->message.size - nbMessage->dataOffset;
 
 		if (bytesToSend > 0) {
-			if (nbMessage->dataOffset < attachmentsSize) {
+			if (bytesToSend > attachmentsSize) {
 				res = send(targetSocket, nbMessage->message.data + nbMessage->dataOffset,
-						bytesToSend, MSG_NOSIGNAL);
+						bytesToSend - attachmentsSize, MSG_NOSIGNAL);
 			} else {
-				res = get_buffer_from_attachments(nbMessage->dataOffset - attachmentsSize, buffer, mail);
+				res = get_buffer_from_attachments(attachmentsSize - bytesToSend, buffer, mail);
 				if (res > 0) {
 					res = send(targetSocket, buffer, res, MSG_NOSIGNAL);
 				}
 			}
+		} else {
+			nbMessage->isPartial = 0;
 		}
 	}
-	/* TODO: handle files */
+
 	if (res == -1) {
 		return (ERROR);
 	} else if (res == 0) {
@@ -342,7 +340,7 @@ int send_partial_message(int targetSocket, NonBlockingMessage *nbMessage, Mail *
 int send_non_blocking_message_with_attachments(int targetSocket, NonBlockingMessage *nbMessage,
 		Mail *mail) {
 	int res;
-
+/* TODO: consider free after done sending */
 	if (!(nbMessage->headerHandled)) {
 		/* Receiving the beginning of the message - only header */
 		res = send_header(targetSocket, nbMessage);
@@ -365,8 +363,7 @@ int send_non_blocking_message_with_attachments(int targetSocket, NonBlockingMess
 	return (res);
 }
 
-int send_non_blocking_message(int targetSocket, NonBlockingMessage *nbMessage,
-		Mail *mail) {
+int send_non_blocking_message(int targetSocket, NonBlockingMessage *nbMessage) {
 	return send_non_blocking_message_with_attachments(targetSocket, nbMessage, NULL);
 }
 
@@ -504,18 +501,18 @@ int recv_typed_message(int socket, Message *message,
 	return (0);
 }
 
-int prepare_message_from_string(char* str, Message* message) {
+int prepare_message_from_string(char* str, NonBlockingMessage* nbMessage) {
 
-	message->messageType = String;
-	message->messageSize = VariedSize;
-	message->size = strlen(str);
+	nbMessage->message.messageType = String;
+	nbMessage->message.messageSize = VariedSize;
+	nbMessage->message.size = strlen(str);
 
-	message->data = calloc(message->size, 1);
-	if (message->data == NULL) {
+	nbMessage->message.data = calloc(nbMessage->message.size, 1);
+	if (nbMessage->message.data == NULL) {
 		return (ERROR);
 	}
 
-	memcpy(message->data, str, message->size);
+	memcpy(nbMessage->message.data, str, nbMessage->message.size);
 	return (0);
 }
 
@@ -527,25 +524,6 @@ int prepare_string_from_message(char** str, Message* message) {
 	memcpy(*str, message->data, message->size);
 	free_message(message);
 	return (*str == NULL ? ERROR : 0);
-}
-
-int send_message_from_string (int socket, char *str) {
-
-	Message message;
-	int res;
-
-	res = prepare_message_from_string(str, &message);
-	if (res != 0) {
-		free_message(&message);
-		return (res);
-	}
-
-	res = send_message(socket, &message);
-	if (res != 0) {
-		return (res);
-	}
-
-	return (0);
 }
 
 int recv_string_from_message (int socket, char **str) {
