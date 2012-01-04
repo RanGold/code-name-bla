@@ -100,7 +100,7 @@ int send_non_blocking_message(int targetSocket, NonBlockingMessage *nbMessage);
 int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nbMessage);
 
 /* prepares a message from string */
-int prepare_message_from_string(char* str, NonBlockingMessage* nbMessage);
+int prepare_message_from_string(char* str, NonBlockingMessage *nbMessage);
 
 /* Receive a string from a message */
 int recv_string_from_message (int socket, char **str);
@@ -136,7 +136,7 @@ void free_mails(int mailAmount, Mail *mails);
 int send_show_inbox_message(int socket);
 
 /* Send a message containing the data need to display the inbox content */
-int send_message_from_inbox_content(int socket, Mail **mails, unsigned short mailAmount);
+int prepare_message_from_inbox_content(Mail **mails, unsigned short mailAmount, NonBlockingMessage* nbMessage);
 
 /* Receive inbox content data from a message */
 int recv_inbox_content_from_message(int socket, Mail **mails, unsigned short *mailAmount);
@@ -145,13 +145,13 @@ int recv_inbox_content_from_message(int socket, Mail **mails, unsigned short *ma
 int send_get_mail_message(int socket, unsigned short mailID);
 
 /* Preparing mail id from a received message */
-void prepare_mail_id_from_message(Message *message, unsigned short *mailID, MessageType messageType);
+unsigned short prepare_mail_id_from_message(NonBlockingMessage *nbMessage, MessageType messageType);
 
-/* Send invalid id message */
-int send_invalid_id_message(int socket);
+/* Prepares invalid id message */
+void prepare_invalid_id_message(NonBlockingMessage *nbMessage);
 
-/* Send a message containing mail data not including its attachments */
-int send_message_from_mail(int socket, Mail *mail);
+/* Prepares a message containing mail data not including its attachments */
+int prepare_message_from_mail(Mail *mail, NonBlockingMessage *nbMessage);
 
 /* Receive a message containing mail data not including its attachments */
 int recv_mail_from_message(int socket, Mail *mail);
@@ -160,10 +160,10 @@ int recv_mail_from_message(int socket, Mail *mail);
 int send_get_attachment_message(int socket, unsigned short mailID, unsigned char attachmentID);
 
 /* Preparing attachment id and mail if from a received message */
-void prepare_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachmentID);
+void prepare_mail_attachment_id_from_message(NonBlockingMessage *nbMessage, unsigned short *mailID, unsigned char *attachmentID);
 
-/* Send message containing an attachment data */
-int send_message_from_attachment(int socket, Attachment *attachment);
+/* Prepares message containing an attachment data */
+int prepare_message_from_attachment(Attachment *attachment, NonBlockingMessage *nbMessage);
 
 /* Receive an attachment data from message */
 int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath);
@@ -171,8 +171,8 @@ int recv_attachment_file_from_message(int socket, Attachment *attachment, char* 
 /* Send delete mail by id message */
 int send_delete_mail_message(int socket, unsigned short mailID);
 
-/* Send delete approve message */
-int send_delete_approve_message(int socket);
+/* Prepares delete approve message */
+void prepare_delete_approve_message(NonBlockingMessage *nbMessage);
 
 /* Receiving delete mail by id result */
 int recv_delete_result(int socket);
@@ -181,13 +181,13 @@ int recv_delete_result(int socket);
 int send_compose_message_from_mail(int socket, Mail *mail);
 
 /* Prepare mail data including attachments a compose message */
-int prepare_mail_from_compose_message(Message *message, Mail **mail);
+int prepare_mail_from_compose_message(NonBlockingMessage *nbMessage, Mail **mail);
 
-/* Send send approve message */
-int send_send_approve_message(int socket);
+/* Prepares send approve message */
+void prepare_send_approve_message(NonBlockingMessage *nbMessage);
 
 /* Receive compose result */
 int recv_send_result(int socket);
 
-/* Send invalid command message */
-int send_invalid_command_message(int socket);
+/* Prepares invalid command message */
+void prepare_invalid_command_message(NonBlockingMessage* nbMessage);

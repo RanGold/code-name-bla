@@ -314,6 +314,7 @@ int send_partial_message(int targetSocket, NonBlockingMessage *nbMessage, Mail *
 			}
 		} else {
 			free_non_blocking_message(nbMessage);
+			return (0);
 		}
 	}
 
@@ -332,14 +333,14 @@ int send_partial_message(int targetSocket, NonBlockingMessage *nbMessage, Mail *
 		}
 	}
 
-	return 0;
+	return (0);
 }
 
 /* Send a non blocking message to the stream with attachments */
 int send_non_blocking_message_with_attachments(int targetSocket, NonBlockingMessage *nbMessage,
 		Mail *mail) {
 	int res;
-/* TODO: consider free after done sending */
+
 	if (!(nbMessage->headerHandled)) {
 		/* Receiving the beginning of the message - only header */
 		res = send_header(targetSocket, nbMessage);
@@ -349,7 +350,7 @@ int send_non_blocking_message_with_attachments(int targetSocket, NonBlockingMess
 			nbMessage->dataOffset = -sizeof(nbMessage->message.size);
 			nbMessage->sizeHandled = 0;
 		} else if (nbMessage->message.messageSize == ZeroSize) {
-			nbMessage->isPartial = 0;
+			free_non_blocking_message(nbMessage);
 		}
 	} else if (nbMessage->isPartial) {
 		/* This can change the isPartial to false, now the header is already sent */
@@ -500,7 +501,7 @@ int recv_typed_message(int socket, Message *message,
 	return (0);
 }
 
-int prepare_message_from_string(char* str, NonBlockingMessage* nbMessage) {
+int prepare_message_from_string(char* str, NonBlockingMessage *nbMessage) {
 
 	nbMessage->isPartial = 1;
 	nbMessage->messageInitialized = 1;
@@ -510,6 +511,7 @@ int prepare_message_from_string(char* str, NonBlockingMessage* nbMessage) {
 
 	nbMessage->message.data = calloc(nbMessage->message.size, 1);
 	if (nbMessage->message.data == NULL) {
+		free_non_blocking_message(nbMessage);
 		return (ERROR);
 	}
 
@@ -548,12 +550,12 @@ int recv_string_from_message (int socket, char **str) {
 }
 
 int prepare_message_from_credentials(char *userName, char *password,
-		Message *message, int isChatSocket) {
+		Message *message) {
 
 	char credentials[MAX_NAME_LEN + MAX_PASSWORD_LEN + 2];
 	sprintf(credentials, "%s\t%s", userName, password);
 
-	message->messageType = isChatSocket == 1 ? CredentialsChat : CredentialsMain;
+	message->messageType = CredentialsMain;
 	message->size = strlen(credentials);
 	message->messageSize = VariedSize;
 	message->data = (unsigned char*) calloc(message->size, 1);
@@ -598,7 +600,7 @@ int send_message_from_credentials(int socket, int chatSocket, char* userName, ch
 	Message message;
 	int res;
 
-	if (prepare_message_from_credentials(userName, password, &message, 0) != 0) {
+	if (prepare_message_from_credentials(userName, password, &message) != 0) {
 		free_message(&message);
 		return (ERROR);
 	}
@@ -607,13 +609,13 @@ int send_message_from_credentials(int socket, int chatSocket, char* userName, ch
 		return (res);
 	}
 
-	free_message(&message);
-	if (prepare_message_from_credentials(userName, password, &message, 1) != 0) {
+	if (prepare_message_from_credentials(userName, password, &message) != 0) {
 		free_message(&message);
 		return (ERROR);
 	}
-
-	if ((res = send_message(socket, &message)) != 0) {
+	message.messageType = CredentialsChat;
+	if ((res = send_message(chatSocket, &message)) != 0) {
+		free_message(&message);
 		return (res);
 	}
 
@@ -631,7 +633,7 @@ int prepare_credentials_from_message(Message* message, char* userName, char* pas
 
 	memcpy(credentials, message->data, message->size);
 	credentials[message->size] = 0;
-	free_message(message);
+
 	if (sscanf(credentials, "%s\t%s", userName, password) != 2) {
 		return (ERROR);
 	} else {
@@ -782,35 +784,37 @@ unsigned short calculate_non_empty_mail_amount(Mail **mails, int mailAmount) {
 	return (amount);
 }
 
-int prepare_message_from_inbox_content(Mail **mails, unsigned short mailAmount, Message *message) {
+int prepare_message_from_inbox_content(Mail **mails, unsigned short mailAmount, NonBlockingMessage* nbMessage) {
 
 	int i;
 	int offset = 0;
 	unsigned short netNonEmptyMails, netClientID, nonEmptyMails;
 
 	nonEmptyMails = calculate_non_empty_mail_amount(mails, mailAmount);
-	message->messageType = InboxContent;
+	nbMessage->isPartial = 1;
+	nbMessage->messageInitialized = 1;
+	nbMessage->message.messageType = InboxContent;
 
 	/* Calculating message size */
-	message->size = calculate_inbox_info_size(mails, mailAmount) + sizeof(nonEmptyMails);
-	message->messageSize = VariedSize;
+	nbMessage->message.size = calculate_inbox_info_size(mails, mailAmount) + sizeof(nonEmptyMails);
+	nbMessage->message.messageSize = VariedSize;
 
-	message->data = (unsigned char*)calloc(message->size, 1);
-	if (message->data == NULL) {
+	nbMessage->message.data = (unsigned char*)calloc(nbMessage->message.size, 1);
+	if (nbMessage->message.data == NULL) {
 		return (ERROR);
 	}
 
 	netNonEmptyMails = htons(nonEmptyMails);
-	memcpy(message->data + offset, &netNonEmptyMails, sizeof(netNonEmptyMails));
+	memcpy(nbMessage->message.data + offset, &netNonEmptyMails, sizeof(netNonEmptyMails));
 	offset += sizeof(mailAmount);
 
 	for (i = 0; i < mailAmount; i++) {
 		if (mails[i] != NULL) {
 
 			netClientID = htons(mails[i]->clientId);
-			memcpy(message->data + offset, &netClientID, sizeof(netClientID));
+			memcpy(nbMessage->message.data + offset, &netClientID, sizeof(netClientID));
 			offset += sizeof(mails[i]->clientId);
-			insert_mail_header_to_buffer(message->data, &offset, mails[i]);
+			insert_mail_header_to_buffer(nbMessage->message.data, &offset, mails[i]);
 		}
 	}
 
@@ -819,23 +823,6 @@ int prepare_message_from_inbox_content(Mail **mails, unsigned short mailAmount, 
 
 int send_show_inbox_message(int socket) {
 	return (send_empty_message(socket, ShowInbox));
-}
-
-int send_message_from_inbox_content(int socket, Mail **mails, unsigned short mailAmount) {
-
-	Message message;
-	int res;
-
-	if (prepare_message_from_inbox_content(mails, mailAmount, &message) != 0) {
-		free_message(&message);
-		return (ERROR);
-	}
-
-	if ((res = send_message(socket, &message)) != 0) {
-		return (res);
-	}
-
-	return (0);
 }
 
 int prepare_mail_header_from_message(Message *message, Mail *mail, int *offset) {
@@ -966,18 +953,19 @@ int send_get_mail_message(int socket, unsigned short mailID) {
 	return (res);
 }
 
-void prepare_mail_id_from_message(Message *message, unsigned short *mailID, MessageType messageType) {
+unsigned short prepare_mail_id_from_message(NonBlockingMessage *nbMessage, MessageType messageType) {
 
-	unsigned short netMailID;
+	unsigned short netMailID, mailID;
 
-	if (message->messageType != messageType || message->messageSize != TwoBytes) {
-		*mailID = ERROR_LOGICAL;
+	if (nbMessage->message.messageType != messageType || nbMessage->message.messageSize != TwoBytes) {
+		mailID = ERROR_LOGICAL;
 	} else {
-		memcpy(&netMailID, message->data, message->size);
-		*mailID = ntohs(netMailID);
+		memcpy(&netMailID, nbMessage->message.data, nbMessage->message.size);
+		mailID = ntohs(netMailID);
 	}
 
-	free_message(message);
+	free_non_blocking_message(nbMessage);
+	return (mailID);
 }
 
 void insert_mail_contents_to_buffer(unsigned char *buffer, int *offset, Mail *mail) {
@@ -1009,43 +997,30 @@ void insert_mail_contents_to_buffer(unsigned char *buffer, int *offset, Mail *ma
 	*offset += bodyLen;
 }
 
-int prepare_message_from_mail(Mail *mail, Message *message) {
+int prepare_message_from_mail(Mail *mail, NonBlockingMessage *nbMessage) {
 
 	int offset = 0;
 
-	message->messageType = MailContent;
-	message->size = calculate_mail_size(mail);
-	message->messageSize = VariedSize;
-	message->data = calloc(message->size, 1);
-	if (message->data == NULL) {
+	nbMessage->isPartial = 1;
+	nbMessage->messageInitialized = 1;
+	nbMessage->message.messageType = MailContent;
+	nbMessage->message.size = calculate_mail_size(mail);
+	nbMessage->message.messageSize = VariedSize;
+	nbMessage->message.data = calloc(nbMessage->message.size, 1);
+	if (nbMessage->message.data == NULL) {
+		free_non_blocking_message(nbMessage);
 		return (ERROR);
 	}
 
-	insert_mail_header_to_buffer(message->data, &offset, mail);
+	insert_mail_header_to_buffer(nbMessage->message.data, &offset, mail);
 
-	insert_mail_contents_to_buffer(message->data, &offset, mail);
+	insert_mail_contents_to_buffer(nbMessage->message.data, &offset, mail);
 
 	return (0);
 }
 
-int send_invalid_id_message(int socket) {
-	return (send_empty_message(socket, InvalidID));
-}
-
-int send_message_from_mail(int socket, Mail *mail) {
-
-	int res;
-	Message message;
-
-	if (prepare_message_from_mail(mail, &message) != 0) {
-		return (ERROR);
-	}
-
-	if ((res = send_message(socket, &message)) != 0) {
-		return (res);
-	}
-
-	return (0);
+void prepare_invalid_id_message(NonBlockingMessage *nbMessage) {
+	set_empty_message(nbMessage, InvalidID);
 }
 
 int prepare_mail_from_message(Message *message, Mail *mail, int *offset) {
@@ -1153,48 +1128,36 @@ int send_get_attachment_message(int socket, unsigned short mailID,
 	return (res);
 }
 
-void prepare_mail_attachment_id_from_message(Message *message, unsigned short *mailID, unsigned char *attachmentID) {
+void prepare_mail_attachment_id_from_message(NonBlockingMessage *nbMessage, unsigned short *mailID, unsigned char *attachmentID) {
 
 	unsigned short netMailID;
 
-	if ((message->messageType != GetAttachment)
-			|| (message->messageSize != ThreeBytes)) {
+	if ((nbMessage->message.messageType != GetAttachment)
+			|| (nbMessage->message.messageSize != ThreeBytes)) {
 		*mailID = ERROR_LOGICAL;
 	} else {
-		memcpy(&netMailID, message->data, sizeof(netMailID));
+		memcpy(&netMailID, nbMessage->message.data, sizeof(netMailID));
 		*mailID = ntohs(netMailID);
-		memcpy(attachmentID, message->data + sizeof(netMailID), 1);
+		memcpy(attachmentID, nbMessage->message.data + sizeof(netMailID), 1);
 	}
 
-	free_message(message);
+	free_non_blocking_message(nbMessage);
 }
 
-int prepare_message_from_attachment(Attachment *attachment, Message *message) {
+int prepare_message_from_attachment(Attachment *attachment, NonBlockingMessage *nbMessage) {
 
-	message->messageType = AttachmentContent;
-	message->messageSize = VariedSize;
-	message->size = attachment->size + strlen(attachment->fileName) + 1;
-	message->data = calloc(message->size, 1);
-	if (message->data == NULL){
+	nbMessage->isPartial = 1;
+	nbMessage->messageInitialized = 1;
+	nbMessage->message.messageType = AttachmentContent;
+	nbMessage->message.messageSize = VariedSize;
+	nbMessage->message.size = attachment->size + strlen(attachment->fileName) + 1;
+	nbMessage->message.data = calloc(nbMessage->message.size, 1);
+	if (nbMessage->message.data == NULL) {
+		free_non_blocking_message(nbMessage);
 		return (ERROR);
 	}
-	memcpy(message->data, attachment->fileName, strlen(attachment->fileName) + 1);
-	memcpy(message->data + strlen(attachment->fileName) + 1, attachment->data, attachment->size);
-
-	return (0);
-}
-
-int send_message_from_attachment(int socket, Attachment *attachment) {
-	int res;
-	Message message;
-
-	if (prepare_message_from_attachment(attachment, &message) != 0) {
-		return (ERROR);
-	}
-
-	if ((res = send_message(socket, &message)) != 0) {
-		return (res);
-	}
+	memcpy(nbMessage->message.data, attachment->fileName, strlen(attachment->fileName) + 1);
+	memcpy(nbMessage->message.data + strlen(attachment->fileName) + 1, attachment->data, attachment->size);
 
 	return (0);
 }
@@ -1283,8 +1246,8 @@ int send_delete_mail_message(int socket, unsigned short mailID) {
 	return (res);
 }
 
-int send_delete_approve_message(int socket) {
-	return (send_empty_message(socket, DeleteApprove));
+void prepare_delete_approve_message(NonBlockingMessage *nbMessage) {
+	set_empty_message(nbMessage, DeleteApprove);
 }
 
 int recv_delete_result(int socket) {
@@ -1363,34 +1326,34 @@ int prepare_mail_attachments_from_message(Message *message, Mail *mail, int *off
 	return (0);
 }
 
-int prepare_mail_from_compose_message(Message *message, Mail **mail) {
+int prepare_mail_from_compose_message(NonBlockingMessage *nbMessage, Mail **mail) {
 
 	int res, offset = 0;
 
 	*mail = calloc(1, sizeof(Mail));
 	if (*mail == NULL) {
-		free_message(message);
+		free_non_blocking_message(nbMessage);
 		return (ERROR);
 	}
 
-	res = prepare_mail_from_message(message, *mail, &offset);
+	res = prepare_mail_from_message(&(nbMessage->message), *mail, &offset);
 	if (res != 0) {
-		free_message(message);
+		free_non_blocking_message(nbMessage);
 		return (res);
 	}
 
-	res = prepare_mail_attachments_from_message(message, *mail, &offset);
+	res = prepare_mail_attachments_from_message(&(nbMessage->message), *mail, &offset);
 	if (res != 0) {
-		free_message(message);
+		free_non_blocking_message(nbMessage);
 		return (res);
 	}
 
-	free_message(message);
+	free_non_blocking_message(nbMessage);
 	return (0);
 }
 
-int send_send_approve_message(int socket) {
-	return(send_empty_message(socket, SendApprove));
+void prepare_send_approve_message(NonBlockingMessage *nbMessage) {
+	set_empty_message(nbMessage, SendApprove);
 }
 
 int recv_send_result(int socket) {
@@ -1407,6 +1370,6 @@ int recv_send_result(int socket) {
 	}
 }
 
-int send_invalid_command_message(int socket) {
-	return (send_empty_message(socket, InvalidCommand));
+void prepare_invalid_command_message(NonBlockingMessage* nbMessage) {
+	set_empty_message(nbMessage, InvalidCommand);
 }

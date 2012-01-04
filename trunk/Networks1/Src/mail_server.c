@@ -314,17 +314,6 @@ UnrecognizedUser* add_unrecognized_socket(UnrecognizedUser **unrecognizedUsers, 
 	int i;
 	UnrecognizedUser *newUser;
 
-	/* Searching for a free unrecognized user spot */
-	for (i = 0; i < (*unrecognizedUsersSize); i++) {
-		if (!(*unrecognizedUsers)[i].isActive) {
-			(*unrecognizedUsers)[i].isActive = 1;
-			(*unrecognizedUsers)[i].socket = unrecognizedSocket;
-			(*unreconizedUsersAmount)++;
-			newUser = (*unrecognizedUsers) + i;
-			break;
-		}
-	}
-
 	/* Checking if the unrecognized users array needs to be resized */
 	if (*unrecognizedUsersSize == *unreconizedUsersAmount){
 		(*unrecognizedUsersSize) *= 2;
@@ -338,6 +327,17 @@ UnrecognizedUser* add_unrecognized_socket(UnrecognizedUser **unrecognizedUsers, 
 			memset(&((*unrecognizedUsers)[i].buffer), 0, sizeof(NonBlockingMessage));
 			(*unrecognizedUsers)[i].socket = -1;
 			(*unrecognizedUsers)[i].isActive = 0;
+		}
+	}
+
+	/* Searching for a free unrecognized user spot */
+	for (i = 0; i < (*unrecognizedUsersSize); i++) {
+		if (!(*unrecognizedUsers)[i].isActive) {
+			(*unrecognizedUsers)[i].isActive = 1;
+			(*unrecognizedUsers)[i].socket = unrecognizedSocket;
+			(*unreconizedUsersAmount)++;
+			newUser = (*unrecognizedUsers) + i;
+			break;
 		}
 	}
 
@@ -388,49 +388,136 @@ int do_accept(int listenSocket, UnrecognizedUser **unrecognizedUsers, int *unrec
 	return (0);
 }
 
-/* TODO: needs to fill the buffer with the user's inbox info for the send phase */
-int do_show_inbox() {}
+/* Prepares a message with the user's inbox info for the send phase */
+int do_show_inbox(User* user) {
+	int res;
 
-/* TODO: needs to fill the buffer with the mail for the send phase */
-int do_get_mail() {}
+	prepare_client_ids(user);
+	res = prepare_message_from_inbox_content(user->mails, user->mailsUsed,
+			&(user->mainBuffer));
 
-/* TODO: needs to fill the buffer with the attachment for the send phase */
-int do_get_attachment() {}
+	return res;
+}
 
-/* TODO: 1.delete the mail
-	     2.needs to fill the buffer with the result of the deletion for the send phase */
-int do_delete_mail() {}
+/* Prepares the buffer with the mail for the send phase */
+int do_get_mail(User *curUser) {
+	int res;
+	Mail *mail;
+	unsigned short mailID;
 
-/* TODO: 1.create the mail
-	     2.needs to fill the buffer with the result of the compose for the send phase */
-int do_compose() {}
+	mailID = prepare_mail_id_from_message(&(curUser->mainBuffer), GetMail);
+	if (mailID == ERROR_LOGICAL) {
+		return (mailID);
+	}
+
+	mail = get_mail_by_id(curUser, mailID);
+	if (mail == NULL) {
+		prepare_invalid_id_message(&(curUser->mainBuffer));
+	} else {
+		res = prepare_message_from_mail(mail, &(curUser->mainBuffer));
+	}
+
+	return (res);
+}
+
+/* Prepares the buffer with the attachment for the send phase */
+int do_get_attachment(User *curUser) {
+	int res;
+	unsigned short mailID;
+	unsigned char attachmentID;
+	Attachment *attachment;
+
+	prepare_mail_attachment_id_from_message(&(curUser->mainBuffer), &mailID, &attachmentID);
+	if (mailID == ERROR_LOGICAL) {
+		return (mailID);
+	}
+
+	attachment = get_attachment_by_id(curUser, mailID, attachmentID);
+	if (attachment == NULL) {
+		prepare_invalid_id_message(&(curUser->mainBuffer));
+	} else {
+		res = prepare_message_from_attachment(attachment, &(curUser->mainBuffer));
+	}
+
+	return (res);
+}
+
+/* Deletes the mail and prepares the buffer with the result of the deletion for the send phase */
+int do_delete_mail(User *curUser) {
+	int res;
+	unsigned short mailID;
+
+	mailID = prepare_mail_id_from_message(&(curUser->mainBuffer), DeleteMail);
+	if (mailID == ERROR_LOGICAL) {
+		return (mailID);
+	}
+
+	res = delete_mail(curUser, mailID);
+	if (res == ERROR) {
+		return (res);
+	} else if (res == ERROR_INVALID_ID) {
+		prepare_invalid_id_message(&(curUser->mainBuffer));
+	} else {
+		prepare_delete_approve_message(&(curUser->mainBuffer));
+	}
+
+	return (res);
+}
+
+/* Inserts the new mail message to the correct users arrays */
+int do_compose(User *users, int usersAmount, User *curUser) {
+	int res;
+	Mail *mail;
+
+	res = prepare_mail_from_compose_message(&(curUser->mainBuffer), &mail);
+	if (res == ERROR) {
+		return (res);
+	}
+
+	res = add_mail_to_server(users, usersAmount, curUser->name,
+			mail);
+	if (res == ERROR) {
+		return (res);
+	}
+
+	prepare_send_approve_message(&(curUser->mainBuffer));
+
+	return (res);
+}
 
 /* TODO: 1.check if user is online and prepare chatmessage in chatBuffer for send phase
 	     2.if not online - compose mail */
 int do_chat_message_send() {}
 
-int do_invalid_message() {}
+void do_invalid_message(NonBlockingMessage *nbMessage) {
+	free_non_blocking_message(nbMessage);
+	prepare_invalid_command_message(nbMessage);
+}
 
+/* Updates the unrecognized user status by its credential */
 void do_handle_credentials(UnrecognizedUser *unrecognizedUser, User* users, int usersAmount) {
 	User *curUser;
 
 	curUser = check_credentials_message(users, usersAmount,
 			&(unrecognizedUser->buffer.message));
 
-	if (curUser == NULL) {
+	if (curUser == NULL || curUser->isOnline) {
 		if (unrecognizedUser->buffer.message.messageType == CredentialsMain) {
+			free_non_blocking_message(&(unrecognizedUser->buffer));
 			prepare_credentials_deny_message(&(unrecognizedUser->buffer));
 		}
 	} else {
+
 		if (unrecognizedUser->buffer.message.messageType == CredentialsMain) {
-			prepare_credentials_approve_message(&(curUser->mainBuffer));
 			if (curUser->chatSocket != -1) {
 				curUser->isOnline = 1;
+				prepare_credentials_approve_message(&(curUser->mainBuffer));
 			}
 			curUser->mainSocket = unrecognizedUser->socket;
 		} else {
 			if (curUser->mainSocket != -1) {
 				curUser->isOnline = 1;
+				prepare_credentials_approve_message(&(curUser->mainBuffer));
 			}
 			curUser->chatSocket = unrecognizedUser->socket;
 		}
@@ -504,11 +591,11 @@ void handle_error_fds(fd_set* readfds, fd_set* writefds, fd_set* errorfds, User 
 	}
 }
 
-/* TODO : no is partial in non protocol */
+/* TODO : no isPartial in non protocol */
 /* TODO : because of read and write by stages there could be a situation where both are possible */
 int handle_read_fds(fd_set* readfds, fd_set* writefds, int listenSocket, User *users, int usersAmount,
 		UnrecognizedUser **unrecognizedUsers, int *unrecognizedUsersAmount, int *unrecognizedUsersSize) {
-	int i, res;
+	int i, res = 0;
 	MessageType messageType;
 
 	/* Check if listen socket was signaled */
@@ -525,27 +612,43 @@ int handle_read_fds(fd_set* readfds, fd_set* writefds, int listenSocket, User *u
 				remove_fd_from_fd_sets(users[i].mainSocket, readfds, writefds, NULL);
 				remove_fd_from_fd_sets(users[i].chatSocket, readfds, writefds, NULL);
 				disconnect_user(&(users[i]));
+				continue;
 			}
 
 			if (!(users[i].mainBuffer.isPartial)) {
-				messageType = users[i].mainBuffer.message.messageType;
-				if (messageType == Quit) {
+				switch (users[i].mainBuffer.message.messageType) {
+				case Quit:
 					do_quit(&(users[i]));
-				} else if (messageType == ShowInbox) {
-					res = do_show_inbox();
-				} else if (messageType == GetMail) {
-					res = do_get_mail();
-				} else if (messageType == GetAttachment) {
-					res = do_get_attachment();
-				} else if (messageType == DeleteMail) {
-					res = do_delete_mail();
-				} else if (messageType == Compose) {
-					res = do_compose();
-				} else if (messageType == ChatMessageSend) {
+					break;
+				case ShowInbox:
+					free_non_blocking_message(&(users[i].mainBuffer));
+					res = do_show_inbox(users + i);
+					break;
+				case GetMail:
+					res = do_get_mail(users + i);
+					break;
+				case GetAttachment:
+					res = do_get_attachment(users + i);
+					break;
+				case DeleteMail:
+					res = do_delete_mail(users + i);
+					break;
+				case Compose:
+					res = do_compose(users, usersAmount, users + i);
+					break;
+				case ChatMessageSend:
 					res = do_chat_message_send();
-				} else {
-					res = do_invalid_message();
+					break;
+				default:
+					do_invalid_message(&(users[i].mainBuffer));
 				}
+			}
+
+			res = handle_return_value(res);
+			if (res != 0) {
+				remove_fd_from_fd_sets(users[i].mainSocket, readfds, writefds, NULL);
+				remove_fd_from_fd_sets(users[i].chatSocket, readfds, writefds, NULL);
+				disconnect_user(&(users[i]));
 			}
 		}
 	}
@@ -562,8 +665,11 @@ int handle_read_fds(fd_set* readfds, fd_set* writefds, int listenSocket, User *u
 				messageType = (*unrecognizedUsers)[i].buffer.message.messageType;
 				if (messageType == CredentialsMain || messageType == CredentialsChat) {
 					do_handle_credentials((*unrecognizedUsers) + i, users, usersAmount);
+				} else if (messageType == Quit) {
+					remove_fd_from_fd_sets((*unrecognizedUsers)[i].socket, readfds, writefds, NULL);
+					disconnect_unrecognized_user(*unrecognizedUsers + i);
 				} else {
-					do_invalid_message();
+					do_invalid_message(&((*unrecognizedUsers)[i].buffer));
 				}
 			}
 		}
@@ -663,13 +769,8 @@ int main(int argc, char** argv) {
 	/* Variables declaration */
 	short port = DEAFULT_PORT;
 	int usersAmount, res;
-	User *users = NULL, *curUser = NULL;
-	int listenSocket, clientSocket;
-	unsigned short mailID;
-	unsigned char attachmentID;
-	Message message;
-	Mail *mail;
-	Attachment *attachment;
+	User *users = NULL;
+	int listenSocket;
 	fd_set readfds, writefds, errorfds;
 	int maxfd;
 	struct timeval tv;
@@ -711,15 +812,6 @@ int main(int argc, char** argv) {
 	tv.tv_usec = SELECT_UTIMEVAL;
 
 	do {
-		/* Making sure the loop won't run with no action */
-		refresh_sets(&readfds, &writefds, &errorfds, &maxfd, listenSocket, users, usersAmount,
-					unrecognizedUsers, unrecognizedUsersSize);
-		res = select(maxfd, &readfds, &writefds, &errorfds, NULL);
-		res = handle_return_value(res);
-		if (res == ERROR) {
-			break;
-		}
-
 		/* Gathering all relevant file descriptors */
 		refresh_sets(&readfds, &writefds, &errorfds, &maxfd, listenSocket, users, usersAmount,
 				unrecognizedUsers, unrecognizedUsersSize);
@@ -742,153 +834,11 @@ int main(int argc, char** argv) {
 
 	} while (1);
 
-
-
-	do {
-		/* Sending welcome message */
-		/*res = send_message_from_string(clientSocket, WELLCOME_MESSAGE);
-		res = handle_return_value(res);*/
-		if (res == 0) {
-			memset(&message, 0, sizeof(Message));
-			do {
-				/* Waiting for client request */
-				res = recv_message(clientSocket, &message);
-				res = handle_return_value(res);
-				if (res == ERROR) {
-					break;
-				}
-
-				if (message.messageType == Quit) {
-					break;
-				} else if (curUser == NULL) {
-					/*
-					curUser = check_credentials_message(users, usersAmount,
-							&message);
-
-					if (curUser == NULL) {
-						res = send_credentials_deny_message(clientSocket);
-					} else {
-						res = send_credentials_approve_message(clientSocket);
-					}
-
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-					*/
-				} else if (message.messageType == ShowInbox) {
-					prepare_client_ids(curUser);
-					res = send_message_from_inbox_content(clientSocket,
-							curUser->mails, curUser->mailsUsed);
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-				} else if (message.messageType == GetMail) {
-
-					prepare_mail_id_from_message(&message, &mailID, GetMail);
-					if (mailID == ERROR_LOGICAL) {
-						print_error_message(INVALID_DATA_MESSAGE);
-						break;
-					}
-
-					mail = get_mail_by_id(curUser, mailID);
-					if (mail == NULL) {
-						res = send_invalid_id_message(clientSocket);
-					} else {
-						res = send_message_from_mail(clientSocket, mail);
-					}
-
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-				} else if (message.messageType == GetAttachment) {
-
-					prepare_mail_attachment_id_from_message(&message, &mailID,
-							&attachmentID);
-					if (mailID == ERROR_LOGICAL) {
-						print_error_message(INVALID_DATA_MESSAGE);
-						break;
-					}
-
-					attachment = get_attachment_by_id(curUser, mailID,
-							attachmentID);
-					if (attachment == NULL) {
-						res = send_invalid_id_message(clientSocket);
-					} else {
-						res = send_message_from_attachment(clientSocket,
-								attachment);
-					}
-
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-				} else if (message.messageType == DeleteMail) {
-					prepare_mail_id_from_message(&message, &mailID, DeleteMail);
-					if (mailID == ERROR_LOGICAL) {
-						print_error_message(INVALID_DATA_MESSAGE);
-						break;
-					}
-
-					res = delete_mail(curUser, mailID);
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-					if (res == ERROR_INVALID_ID) {
-						res = send_invalid_id_message(clientSocket);
-					} else {
-						res = send_delete_approve_message(clientSocket);
-					}
-
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-				} else if (message.messageType == Compose) {
-					res = prepare_mail_from_compose_message(&message, &mail);
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-
-					res = add_mail_to_server(users, usersAmount, curUser->name,
-							mail);
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-
-					res = send_send_approve_message(clientSocket);
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-				} else {
-					res = send_invalid_command_message(clientSocket);
-					res = handle_return_value(res);
-					if (res == ERROR) {
-						break;
-					}
-				}
-
-				free_message(&message);
-			} while (1);
-		}
-
-		curUser = NULL;
-		free_message(&message);
-		close(clientSocket);
-	} while (1);
-
 	/* Releasing resources */
 	init_FD_sets(&readfds, &writefds, &errorfds);
 	free_unrecognized_users_array(unrecognizedUsers, unrecognizedUsersSize);
 	free_users_array(users, usersAmount);
 	close(listenSocket);
-	free_message(&message);
 
 	return (res);
 }
