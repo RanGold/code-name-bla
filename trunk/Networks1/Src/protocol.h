@@ -99,6 +99,12 @@ int send_non_blocking_message(int targetSocket, NonBlockingMessage *nbMessage);
 /* Receive a non blocking message from the stream */
 int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nbMessage);
 
+/* Returns if a full message was received */
+int is_full_message_received(NonBlockingMessage *nbMessage);
+
+/* Returns if there is a message to send */
+int is_there_message_to_send(NonBlockingMessage *nbMessage);
+
 /* prepares a message from string */
 int prepare_message_from_string(char* str, NonBlockingMessage *nbMessage);
 

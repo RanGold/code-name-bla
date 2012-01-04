@@ -482,6 +482,14 @@ int recv_non_blocking_message(int sourceSocket, NonBlockingMessage *nbMessage) {
 	return (res);
 }
 
+int is_full_message_received(NonBlockingMessage *nbMessage) {
+	return (!nbMessage->isPartial && !nbMessage->messageInitialized);
+}
+
+int is_there_message_to_send(NonBlockingMessage *nbMessage) {
+	return (nbMessage->isPartial && nbMessage->messageInitialized);
+}
+
 int recv_typed_message(int socket, Message *message,
 		MessageType messageType) {
 	int res;
