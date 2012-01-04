@@ -154,9 +154,7 @@ int initialize_unrecognized_users_array(UnrecognizedUser **unrecognizedUsers) {
 		return (ERROR);
 	}
 
-	(*unrecognizedUsers)[0].isActive = 0;
 	(*unrecognizedUsers)[0].socket = -1;
-	(*unrecognizedUsers)[0].buffer.isPartial = 1;
 
 	return (0);
 }
@@ -338,9 +336,8 @@ UnrecognizedUser* add_unrecognized_socket(UnrecognizedUser **unrecognizedUsers, 
 		/* Initializing new unrecognized users */
 		for (i = (*unrecognizedUsersSize) / 2; i < (*unrecognizedUsersSize); i++) {
 			memset(&((*unrecognizedUsers)[i].buffer), 0, sizeof(NonBlockingMessage));
-			(*unrecognizedUsers)[i].isActive = 0;
 			(*unrecognizedUsers)[i].socket = -1;
-			(*unrecognizedUsers)[0].buffer.isPartial = 1;
+			(*unrecognizedUsers)[i].isActive = 0;
 		}
 	}
 
@@ -427,9 +424,14 @@ void do_handle_credentials(UnrecognizedUser *unrecognizedUser, User* users, int 
 	} else {
 		if (unrecognizedUser->buffer.message.messageType == CredentialsMain) {
 			prepare_credentials_approve_message(&(curUser->mainBuffer));
-			curUser->isOnline = 1;
+			if (curUser->chatSocket != -1) {
+				curUser->isOnline = 1;
+			}
 			curUser->mainSocket = unrecognizedUser->socket;
 		} else {
+			if (curUser->mainSocket != -1) {
+				curUser->isOnline = 1;
+			}
 			curUser->chatSocket = unrecognizedUser->socket;
 		}
 
@@ -502,6 +504,7 @@ void handle_error_fds(fd_set* readfds, fd_set* writefds, fd_set* errorfds, User 
 	}
 }
 
+/* TODO : no is partial in non protocol */
 /* TODO : because of read and write by stages there could be a situation where both are possible */
 int handle_read_fds(fd_set* readfds, fd_set* writefds, int listenSocket, User *users, int usersAmount,
 		UnrecognizedUser **unrecognizedUsers, int *unrecognizedUsersAmount, int *unrecognizedUsersSize) {
@@ -576,14 +579,16 @@ void handle_send_fds(fd_set *writefds, User *users, int userAmounts,
 	/* TODO: when empty message and client awaits input this will send */
 	for (i = 0; i < userAmounts; i++){
 		if (users[i].isOnline) {
-			if (FD_ISSET(users[i].mainSocket, writefds)  && users[i].mainBuffer.isPartial) {
+			if (FD_ISSET(users[i].mainSocket, writefds)  && users[i].mainBuffer.isPartial &&
+					users[i].mainBuffer.messageInitialized) {
 				res = send_non_blocking_message(users[i].mainSocket, &(users[i].mainBuffer));
 				if (res != 0) {
 					disconnect_user(users + i);
 				}
 			}
 
-			if (FD_ISSET(users[i].chatSocket, writefds)  && users[i].chatBuffer.isPartial) {
+			if (FD_ISSET(users[i].chatSocket, writefds)  && users[i].chatBuffer.isPartial &&
+					users[i].mainBuffer.messageInitialized) {
 				res = send_non_blocking_message(users[i].chatSocket, &(users[i].chatBuffer));
 				if (res != 0) {
 					disconnect_user(users + i);
@@ -593,8 +598,8 @@ void handle_send_fds(fd_set *writefds, User *users, int userAmounts,
 	}
 
 	for (i = 0; i < unreconizedUsersAmount; i++) {
-		if (unrecognizedUsers[i].isActive &&
-			FD_ISSET(unrecognizedUsers[i].socket, writefds) && unrecognizedUsers[i].buffer.isPartial) {
+		if (unrecognizedUsers[i].isActive && FD_ISSET(unrecognizedUsers[i].socket, writefds) &&
+				unrecognizedUsers[i].buffer.isPartial && unrecognizedUsers[i].buffer.messageInitialized) {
 			res = send_non_blocking_message(unrecognizedUsers[i].socket, &(unrecognizedUsers[i].buffer));
 			if (res != 0) {
 				disconnect_unrecognized_user(unrecognizedUsers + i);

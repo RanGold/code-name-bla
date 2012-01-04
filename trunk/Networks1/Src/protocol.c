@@ -56,7 +56,6 @@ void free_message(Message *message) {
 void free_non_blocking_message(NonBlockingMessage *nbMessage) {
 	free_message(&(nbMessage->message));
 	memset(nbMessage, 0, sizeof(NonBlockingMessage));
-	nbMessage->isPartial = 1;
 }
 
 /* Sends an attachment to stream */
@@ -314,7 +313,7 @@ int send_partial_message(int targetSocket, NonBlockingMessage *nbMessage, Mail *
 				}
 			}
 		} else {
-			nbMessage->isPartial = 0;
+			free_non_blocking_message(nbMessage);
 		}
 	}
 
@@ -329,7 +328,7 @@ int send_partial_message(int targetSocket, NonBlockingMessage *nbMessage, Mail *
 		if ((nbMessage->message.messageSize == VariedSize) && !(nbMessage->sizeHandled) && (nbMessage->dataOffset == 0)) {
 			nbMessage->sizeHandled = 1;
 		} else if (nbMessage->message.size == nbMessage->dataOffset) {
-			nbMessage->isPartial = 0;
+			free_non_blocking_message(nbMessage);
 		}
 	}
 
@@ -503,6 +502,8 @@ int recv_typed_message(int socket, Message *message,
 
 int prepare_message_from_string(char* str, NonBlockingMessage* nbMessage) {
 
+	nbMessage->isPartial = 1;
+	nbMessage->messageInitialized = 1;
 	nbMessage->message.messageType = String;
 	nbMessage->message.messageSize = VariedSize;
 	nbMessage->message.size = strlen(str);
@@ -569,6 +570,8 @@ void set_empty_message(NonBlockingMessage* nbMessage, MessageType type) {
 	nbMessage->message.messageType = type;
 	nbMessage->message.messageSize = ZeroSize;
 	nbMessage->message.size = 0;
+	nbMessage->isPartial = 1;
+	nbMessage->messageInitialized = 1;
 }
 
 int send_empty_message(int socket, MessageType type) {
