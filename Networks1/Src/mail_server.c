@@ -912,12 +912,6 @@ void handle_send_fds(fd_set *writefds, User *users, int userAmounts,
 	}
 }
 
-void init_FD_sets(fd_set *readfds, fd_set *writefds, fd_set *errorfds) {
-	FD_ZERO(readfds);
-	FD_ZERO(writefds);
-	FD_ZERO(errorfds);
-}
-
 /* Preparing the file descriptors sets for the select */
 void refresh_sets(fd_set *readfds, fd_set *writefds, fd_set *errorfds, int *maxSocket,
 				int listenSocket, User *users, int userAmount,

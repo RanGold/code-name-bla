@@ -134,21 +134,24 @@ int prepare_mail_from_compose_input(Mail *mail, char *curUser,
 	}
 
 	/* Preparing subject */
-	mail->subject = calloc(strlen(tempSubject) + 1, 1);
-	if (mail->subject == NULL) {
-		free_mail(mail);
-		return (ERROR);
+	if (tempSubject != NULL){
+		mail->subject = calloc(strlen(tempSubject) + 1, 1);
+		if (mail->subject == NULL) {
+			free_mail(mail);
+			return (ERROR);
+		}
+		strncpy(mail->subject, tempSubject, strlen(tempSubject));
 	}
-	strncpy(mail->subject, tempSubject, strlen(tempSubject));
 
 	/* Preparing text */
-	mail->body = calloc(strlen(tempText) + 1, 1);
-	if (mail->body == NULL) {
-		free_mail(mail);
-		return (ERROR);
+	if (tempText != NULL){
+		mail->body = calloc(strlen(tempText) + 1, 1);
+		if (mail->body == NULL) {
+			free_mail(mail);
+			return (ERROR);
+		}
+		strncpy(mail->body, tempText, strlen(tempText));
 	}
-	strncpy(mail->body, tempText, strlen(tempText));
-
 	/* Preparing recipients */
 	mail->numRecipients = count_occurrences(tempRecipients, ',') + 1;
 	mail->recipients = (char**)calloc(mail->numRecipients, sizeof(char*));
@@ -204,6 +207,253 @@ int prepare_mail_from_compose_input(Mail *mail, char *curUser,
 	return (0);
 }
 
+int do_get_chat(int chatSocket) {
+	Mail mail;
+	int res;
+
+	memset(&mail, 0, sizeof(Mail));
+
+	res = recv_chat_from_message(chatSocket, &mail);
+	/* TODO: handle error */
+
+	printf("New message from %s:  %s",mail.sender, mail.body);
+	free_mail(&mail);
+	return (0);
+}
+
+int do_quit(int mainSocket, int chatSocket){
+	/*TODO: why need res ?? */
+	int res;
+
+	res = send_quit_message(mainSocket, -1, NULL);
+	res = handle_return_value(res);
+
+	res = send_quit_message(chatSocket, -1, NULL);
+	res = handle_return_value(res);
+
+	return (0);
+}
+
+int do_credentials(int mainSocket, int chatSocket, int *isLoggedIn, char *userName, char *password,
+		fd_set readfds, fd_set errorfds, int *maxFd){
+	char input[MAX_INPUT_LEN + 1];
+	int res;
+
+	if ((sscanf(input, "User: %s", userName) + scanf("Password: %s", password)) != 2) {
+		print_error_message(CREDENTIALS_USAGE_MESSAGE);
+
+	} else {
+		res = send_message_from_credentials(mainSocket, chatSocket, userName, password);
+		res = handle_return_value(res);
+
+		if (res == ERROR) {
+			return (res);
+		}
+
+		res = recv_credentials_result(mainSocket, isLoggedIn, -1, NULL);
+		res = handle_return_value(res);
+		if (res == ERROR) {
+			return (res);
+		} else {
+			if (isLoggedIn) {
+				FD_SET(chatSocket, &readfds);
+				FD_SET(chatSocket, &errorfds);
+				*maxFd = chatSocket;
+				printf(CONNECTION_SUCCEED_MESSAGE);
+			} else {
+				print_error_message(WRONG_CREDENTIALS_MESSAGE);
+			}
+		}
+	}
+
+	return (0);
+}
+
+int do_show_inbox(int mainSocket, int chatSocket){
+	int res;
+	unsigned short mailAmount;
+	Mail *mails;
+
+	mails = NULL;
+	res = send_show_inbox_message(mainSocket, chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		return (res);
+	}
+
+	mailAmount = -1;
+	res = recv_inbox_content_from_message(mainSocket, &mails, &mailAmount,
+			chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		if (mails != NULL) {
+			free_mails(mailAmount, mails);
+			free(mails);
+		}
+		return (res);
+	}
+
+	print_inbox_info(mailAmount, mails);
+	free_mails(mailAmount, mails);
+	free(mails);
+
+	return (0);
+}
+
+int do_get_mail(int mainSocket, int chatSocket, unsigned short mailID){
+	int res;
+	Mail mail;
+
+	res = send_get_mail_message(mainSocket, mailID, chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		return (res);
+	}
+
+	res = recv_mail_from_message(mainSocket, &mail, chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		free_mail(&mail);
+		return (res);
+	} else if (res == ERROR_INVALID_ID) {
+		free_mail(&mail);
+		return (res);  /* check in main ERROR_INVALID_ID */
+	} else {
+		print_mail(&mail);
+		free_mail(&mail);
+	}
+	return (0);
+}
+
+int do_get_attachment(int mainSocket, int chatSocket, unsigned char attachmentID,
+		char * attachmentPath, unsigned short mailID){
+	int res;
+	Attachment attachment;
+
+	memset(&attachment, 0, sizeof(Attachment));
+
+	/* Converting to unsigned char while zeroing the non important bits */
+	res = send_get_attachment_message(mainSocket, mailID, attachmentID, chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		return (res);
+	}
+
+	res = recv_attachment_file_from_message(mainSocket, &attachment, attachmentPath,
+			chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		return (res);  /* TODO: originally there was free_mail here - why ?? */
+	} else {
+		printf(ATTACHMENT_SAVE_MESSAGE);
+	}
+	return (0);
+}
+
+int do_delete_mail(int mainSocket, int chatSocket, unsigned short mailID){
+	int res;
+
+	res = send_delete_mail_message(mainSocket, mailID, chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		return (res);
+	}
+
+	res = recv_delete_result(mainSocket, chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		return (res);
+	}
+
+	return (0);
+}
+
+int do_compose(int mainSocket, int chatSocket, char *userName){
+	int res;
+	Mail mail;
+	char input[MAX_INPUT_LEN + 1];
+	char tempRecipients[MAX_INPUT_LEN + 1], tempSubject[MAX_INPUT_LEN + 1],
+	tempAttachments[MAX_INPUT_LEN + 1], tempText[MAX_INPUT_LEN + 1];
+
+	/* Checking input */
+	res = 0;
+	fgets(input, MAX_INPUT_LEN, stdin);
+	if (sscanf(input, "To: %[^\n]\n", tempRecipients) == 1) {
+		fgets(input, MAX_INPUT_LEN, stdin);
+		if (sscanf(input, "Subject: %[^\n]\n", tempSubject) == 1) {
+			fgets(input, MAX_INPUT_LEN, stdin);
+			if ((sscanf(input, "Attachments: %[^\n]\n", tempAttachments) == 1) ||
+					(sscanf(input, "Attachments:%[\n]", tempAttachments) == 1) ||
+					(sscanf(input, "Attachments:%*[ ]%[\n]", tempAttachments) == 1)){
+				fgets(input, MAX_INPUT_LEN, stdin);
+				if (sscanf(input, "Text: %[^\n]\n", tempText) == 1) {
+					res = 1;
+				}
+			}
+		}
+	}
+
+	if (res == 0) {
+		print_error_message(COMPOSE_USAGE_MESSAGE);
+	} else {
+		res = prepare_mail_from_compose_input(&mail, userName, tempRecipients,
+				tempSubject, tempAttachments, tempText);
+		res = handle_return_value(res);
+		if (res == ERROR) {
+			return (res);
+		}
+
+		res = send_compose_message_from_mail(mainSocket, &mail, chatSocket, recv_chat_message_and_print);
+		res = handle_return_value(res);
+		if (res == ERROR) {
+			free_mail(&mail);
+			return (res);
+		}
+		free_mail(&mail);
+
+		res = recv_send_result(mainSocket, chatSocket, recv_chat_message_and_print);
+		res = handle_return_value(res);
+		if (res == ERROR) {
+			return (res);
+		} else {
+			printf(MAIL_SENT_MESSAGE);
+		}
+	}
+
+
+	return (0);
+}
+
+int do_chat(int mainSocket, int chatSocket, char *toChat, char *textChat, char *userName){
+	int res;
+	Mail mail;
+
+	res = prepare_mail_from_compose_input(&mail, userName, toChat,
+			NULL, NULL, textChat);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		return (res);
+	}
+
+	res = send_compose_message_from_mail(mainSocket, &mail, chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		free_mail(&mail);
+		return (res);
+	}
+	free_mail(&mail);
+
+	res = recv_send_result(mainSocket, chatSocket, recv_chat_message_and_print);
+	res = handle_return_value(res);
+	if (res == ERROR) {
+		return (res);
+	} else {
+		printf(MAIL_SENT_MESSAGE);
+	}
+
+	return (0);
+}
+
 int main(int argc, char** argv) {
 
 	/* Variables declaration */
@@ -212,19 +462,17 @@ int main(int argc, char** argv) {
 	int clientSocket,chatSocket;
 	struct addrinfo hints, *servinfo;
 	int res;
-	char *stringMessage;
 	char userName[MAX_NAME_LEN + 1];
 	char password[MAX_PASSWORD_LEN + 1];
 	char input[MAX_INPUT_LEN + 1];
-	unsigned short mailAmount;
-	Mail *mails, mail;
+	char *stringMessage;
 	char attachmentPath[MAX_PATH_LEN + 1];
 	int isLoggedIn = 0;
 	unsigned short mailID, tempAttachmentID;
-	unsigned char attachmentID;
-	Attachment attachment;
-	char tempRecipients[MAX_INPUT_LEN + 1], tempSubject[MAX_INPUT_LEN + 1],
-			tempAttachments[MAX_INPUT_LEN + 1], tempText[MAX_INPUT_LEN + 1];
+	fd_set readfds, errorfds;
+	int maxFd;
+	char toChat[MAX_INPUT_LEN + 1], textChat[MAX_INPUT_LEN + 1];
+
 
 	/* Validate number of arguments */
 	if (argc != 1 && argc != 2 && argc != 3) {
@@ -266,7 +514,7 @@ int main(int argc, char** argv) {
 	}
 
 	/* Receiving welcome message */
-	res = recv_string_from_message(clientSocket, &stringMessage);
+	res = recv_string_from_message(clientSocket, &stringMessage, -1, NULL);
 	res = handle_return_value(res);
 	if (res == ERROR) {
 		close(clientSocket);
@@ -277,7 +525,7 @@ int main(int argc, char** argv) {
 		free(stringMessage);
 	}
 
-	res = recv_string_from_message(chatSocket, &stringMessage);
+	res = recv_string_from_message(chatSocket, &stringMessage, -1, NULL);
 	res = handle_return_value(res);
 	if (res == ERROR) {
 		close(chatSocket);
@@ -287,177 +535,59 @@ int main(int argc, char** argv) {
 		free(stringMessage);
 	}
 
-	/* Initializing structs */
-	memset(&mail, 0, sizeof(Mail));
-	memset(&attachment, 0, sizeof(Attachment));
-	mails = NULL;
+	init_FD_sets(&readfds, NULL, &errorfds);
+	FD_SET(STDIN_FILENO, &readfds);
+	FD_SET(STDIN_FILENO, &errorfds);
+	maxFd = STDIN_FILENO;
 
 	do {
 		res = 0;
-		fgets(input, MAX_INPUT_LEN, stdin);
-		if (strcmp(input, QUIT_MESSAGE) == 0) {
-			res = send_quit_message(clientSocket);
-			res = handle_return_value(res);
-
-			res = send_quit_message(chatSocket);
-			res = handle_return_value(res);
+		select(maxFd, &readfds, NULL, &errorfds, NULL);
+		if ((FD_ISSET(STDIN_FILENO, &errorfds)) || (isLoggedIn  && FD_ISSET(chatSocket, &errorfds))){
+			/* TODO: check error */
 			break;
-		} else if (!isLoggedIn) {
-			if ((sscanf(input, "User: %s", userName) +
-					scanf("Password: %s", password)) != 2) {
-				print_error_message(CREDENTIALS_USAGE_MESSAGE);
-			} else {
-				res = send_message_from_credentials(clientSocket, chatSocket, userName, password);
-				res = handle_return_value(res);
-				if (res == ERROR) {
-					break;
-				}
+		}
+		if (isLoggedIn && (FD_ISSET(chatSocket, &readfds))){
+			do_get_chat(chatSocket);
+		}
 
-				res = recv_credentials_result(clientSocket, &isLoggedIn);
-				res = handle_return_value(res);
-				if (res == ERROR) {
-					break;
-				} else {
-					if (isLoggedIn) {
-						printf(CONNECTION_SUCCEED_MESSAGE);
-					} else {
-						print_error_message(WRONG_CREDENTIALS_MESSAGE);
-					}
-				}
-			}
-			/* Flushing */
+		if (FD_ISSET(STDIN_FILENO, &readfds)){
 			fgets(input, MAX_INPUT_LEN, stdin);
-		} else if (strcmp(input, SHOW_INBOX) == 0) {
-			res = send_show_inbox_message(clientSocket);
-			res = handle_return_value(res);
-			if (res == ERROR) {
-				break;
-			}
 
-			mailAmount = -1;
-			mails = NULL;
-			res = recv_inbox_content_from_message(clientSocket, &mails, &mailAmount);
-			res = handle_return_value(res);
-			if (res == ERROR) {
-				if (mails != NULL) {
-					free_mails(mailAmount, mails);
-					free(mails);
-				}
-				break;
-			}
-
-			print_inbox_info(mailAmount, mails);
-			free_mails(mailAmount, mails);
-			free(mails);
-		} else if (sscanf(input, GET_MAIL "%hu", &mailID) == 1) {
-			res = send_get_mail_message(clientSocket, mailID);
-			res = handle_return_value(res);
-			if (res == ERROR) {
-				break;
-			}
-
-			res = recv_mail_from_message(clientSocket, &mail);
-			res = handle_return_value(res);
-			if (res == ERROR) {
-				free_mail(&mail);
-				break;
-			} else if (res == ERROR_INVALID_ID) {
-				free_mail(&mail);
-				continue;
-			} else {
-				print_mail(&mail);
-				free_mail(&mail);
-			}
-		} else if (sscanf(input, GET_ATTACHMENT "%hu %hu \"%[^\"]\"", &mailID,
-				&tempAttachmentID, attachmentPath) == 3) {
-
-			/* Converting to unsigned char while zeroing the non important bits */
-			attachmentID = (unsigned char)tempAttachmentID;
-			res = send_get_attachment_message(clientSocket, mailID,
-					attachmentID);
-			res = handle_return_value(res);
-			if (res == ERROR) {
-				break;
-			}
-
-			res = recv_attachment_file_from_message(clientSocket, &attachment, attachmentPath);
-			res = handle_return_value(res);
-			if (res == ERROR) {
-				free_mail(&mail);
-				break;
-			} else if (res == ERROR_INVALID_ID) {
-				free_mail(&mail);
-				res = 0;
-				continue;
-			} else {
-				printf(ATTACHMENT_SAVE_MESSAGE);
-			}
-		} else if (sscanf(input, DELETE_MAIL "%hu", &mailID) == 1) {
-			res = send_delete_mail_message(clientSocket, mailID);
-			res = handle_return_value(res);
-			if (res == ERROR) {
-				break;
-			}
-
-			res = recv_delete_result(clientSocket);
-			res = handle_return_value(res);
-			if (res == ERROR) {
-				break;
-			}
-		} else if (strcmp(input, COMPOSE) == 0) {
-			/* Checking input */
-			res = 0;
-			fgets(input, MAX_INPUT_LEN, stdin);
-			if (sscanf(input, "To: %[^\n]\n", tempRecipients) == 1) {
+			if (strcmp(input, QUIT_MESSAGE) == 0) {
+				do_quit(clientSocket, chatSocket);
+			} else if (!isLoggedIn) {
+				res = do_credentials(clientSocket, chatSocket, &isLoggedIn, userName, password,  readfds, errorfds, &maxFd);
+				res = handle_return_value(res);
+				/* Flushing */
 				fgets(input, MAX_INPUT_LEN, stdin);
-				if (sscanf(input, "Subject: %[^\n]\n", tempSubject) == 1) {
-					fgets(input, MAX_INPUT_LEN, stdin);
-					if ((sscanf(input, "Attachments: %[^\n]\n", tempAttachments) == 1) ||
-							(sscanf(input, "Attachments:%[\n]", tempAttachments) == 1) ||
-							(sscanf(input, "Attachments:%*[ ]%[\n]", tempAttachments) == 1)){
-						fgets(input, MAX_INPUT_LEN, stdin);
-						if (sscanf(input, "Text: %[^\n]\n", tempText) == 1) {
-							res = 1;
-						}
-					}
-				}
-			}
-
-			if (res == 0) {
-				print_error_message(COMPOSE_USAGE_MESSAGE);
+			} else if (strcmp(input, SHOW_INBOX) == 0) {
+				res = do_show_inbox(clientSocket, chatSocket);
+			} else if (sscanf(input, GET_MAIL "%hu", &mailID) == 1) {
+				res = do_get_mail(clientSocket, chatSocket, mailID);
+			} else if (sscanf(input, GET_ATTACHMENT "%hu %hu \"%[^\"]\"", &mailID,
+					&tempAttachmentID, attachmentPath) == 3) {
+				res = do_get_attachment(clientSocket, chatSocket, (unsigned char)tempAttachmentID, attachmentPath, mailID);
+			} else if (sscanf(input, DELETE_MAIL "%hu", &mailID) == 1) {
+				res = do_delete_mail(clientSocket, chatSocket, mailID);
+			} else if (strcmp(input, COMPOSE) == 0) {
+				res = do_compose(clientSocket, chatSocket, userName);
+			} else if (sscanf(input, "MSG: %[^\n]: %[^\n]\n", toChat, textChat) == 2) {
+				res = do_chat(clientSocket, chatSocket, toChat, textChat, userName);
 			} else {
-				res = prepare_mail_from_compose_input(&mail, userName, tempRecipients,
-						tempSubject, tempAttachments, tempText);
-				res = handle_return_value(res);
-				if (res == ERROR) {
-					break;
-				}
-
-				res = send_compose_message_from_mail(clientSocket, &mail);
-				res = handle_return_value(res);
-				if (res == ERROR) {
-					free_mail(&mail);
-					break;
-				}
-				free_mail(&mail);
-
-				res = recv_send_result(clientSocket);
-				res = handle_return_value(res);
-				if (res == ERROR) {
-					break;
-				} else {
-					printf(MAIL_SENT_MESSAGE);
-				}
+				print_error_message(INVALID_COMMAND_MESSAGE);
 			}
-		} else {
-			print_error_message(INVALID_COMMAND_MESSAGE);
+
+			if (res == ERROR) {
+				break;
+			}
 		}
 	} while (1);
 
-	/* Close connection and socket */
-	close(clientSocket);
-	freeaddrinfo(servinfo);
+		/* Close connection and socket */
+		close(clientSocket);
+		freeaddrinfo(servinfo);
 
-	return (res);
-}
+		return (res);
+	}
 

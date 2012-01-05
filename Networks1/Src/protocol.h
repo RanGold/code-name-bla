@@ -78,6 +78,8 @@ typedef struct {
 	int messageInitialized;
 } NonBlockingMessage;
 
+typedef int(*InteruptFunction)(int);
+
 /* Frees the message struct */
 void free_message(Message *message);
 
@@ -85,10 +87,10 @@ void free_message(Message *message);
 void free_non_blocking_message(NonBlockingMessage *userBuffer);
 
 /* Send a message to the stream */
-int send_message(int targetSocket, Message *message);
+int send_message(int targetSocket, Message *message, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Receive a message from the stream */
-int recv_message(int sourceSocket, Message *message);
+int recv_message(int sourceSocket, Message *message, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send a non blocking message to the stream with attachments */
 int send_non_blocking_message_with_attachments(int targetSocket, NonBlockingMessage *nbMessage, Mail *mail);
@@ -109,10 +111,10 @@ int is_there_message_to_send(NonBlockingMessage *nbMessage);
 int prepare_message_from_string(char* str, NonBlockingMessage *nbMessage);
 
 /* Receive a string from a message */
-int recv_string_from_message (int socket, char **str);
+int recv_string_from_message (int socket, char **str, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send a quit message */
-int send_quit_message(int socket);
+int send_quit_message(int socket, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send a message containing credentials data */
 int send_message_from_credentials(int socket, int chatSocket, char* userName, char* password);
@@ -127,7 +129,7 @@ void prepare_credentials_deny_message(NonBlockingMessage* nbMessage);
 void prepare_credentials_approve_message(NonBlockingMessage* nbMessage);
 
 /* Receive credentials approve or deny only */
-int recv_credentials_result(int socket, int *isLoggedIn);
+int recv_credentials_result(int socket, int *isLoggedIn, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Frees attachment struct */
 void free_attachment(Attachment *attachment);
@@ -139,16 +141,17 @@ void free_mail(Mail* mail);
 void free_mails(int mailAmount, Mail *mails);
 
 /* Send a show inbox message */
-int send_show_inbox_message(int socket);
+int send_show_inbox_message(int socket, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send a message containing the data need to display the inbox content */
 int prepare_message_from_inbox_content(Mail **mails, unsigned short mailAmount, NonBlockingMessage* nbMessage);
 
 /* Receive inbox content data from a message */
-int recv_inbox_content_from_message(int socket, Mail **mails, unsigned short *mailAmount);
+int recv_inbox_content_from_message(int socket, Mail **mails, unsigned short *mailAmount,
+									int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send get mail by id message */
-int send_get_mail_message(int socket, unsigned short mailID);
+int send_get_mail_message(int socket, unsigned short mailID, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Preparing mail id from a received message */
 unsigned short prepare_mail_id_from_message(NonBlockingMessage *nbMessage, MessageType messageType);
@@ -160,10 +163,11 @@ void prepare_invalid_id_message(NonBlockingMessage *nbMessage);
 int prepare_message_from_mail(Mail *mail, NonBlockingMessage *nbMessage);
 
 /* Receive a message containing mail data not including its attachments */
-int recv_mail_from_message(int socket, Mail *mail);
+int recv_mail_from_message(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send get attachment by mail and attachment id message */
-int send_get_attachment_message(int socket, unsigned short mailID, unsigned char attachmentID);
+int send_get_attachment_message(int socket, unsigned short mailID, unsigned char attachmentID,
+								int interuptSocket, InteruptFunction interuptFunction);
 
 /* Preparing attachment id and mail if from a received message */
 void prepare_mail_attachment_id_from_message(NonBlockingMessage *nbMessage, unsigned short *mailID, unsigned char *attachmentID);
@@ -172,19 +176,22 @@ void prepare_mail_attachment_id_from_message(NonBlockingMessage *nbMessage, unsi
 int prepare_message_from_attachment(Attachment *attachment, NonBlockingMessage *nbMessage);
 
 /* Receive an attachment data from message */
-int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath);
+int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath,
+									  int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send delete mail by id message */
-int send_delete_mail_message(int socket, unsigned short mailID);
+int send_delete_mail_message(int socket, unsigned short mailID, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Prepares delete approve message */
 void prepare_delete_approve_message(NonBlockingMessage *nbMessage);
 
 /* Receiving delete mail by id result */
-int recv_delete_result(int socket);
+int recv_delete_result(int socket, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send compose message from a mail, including all the attachments */
-int send_compose_message_from_mail(int socket, Mail *mail);
+int send_compose_message_from_mail(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction);
+
+int send_chat_from_mail(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Prepare mail data including attachments a compose message */
 int prepare_mail_from_compose_message(NonBlockingMessage *nbMessage, Mail **mail);
@@ -193,7 +200,11 @@ int prepare_mail_from_compose_message(NonBlockingMessage *nbMessage, Mail **mail
 void prepare_send_approve_message(NonBlockingMessage *nbMessage);
 
 /* Receive compose result */
-int recv_send_result(int socket);
+int recv_send_result(int socket, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Prepares invalid command message */
 void prepare_invalid_command_message(NonBlockingMessage* nbMessage);
+
+int recv_chat_from_message(int socket, Mail *ChatMessage);
+
+int recv_chat_message_and_print(int socket);
