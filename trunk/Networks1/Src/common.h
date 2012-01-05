@@ -30,3 +30,5 @@ int handle_return_value(int res);
 
 /* Gets a file for whatever requested mode */
 FILE* get_valid_file(char* fileName, char* mode);
+
+void init_FD_sets(fd_set *readfds, fd_set *writefds, fd_set *errorfds);

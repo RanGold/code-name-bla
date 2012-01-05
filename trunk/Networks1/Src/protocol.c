@@ -5,13 +5,33 @@
 #include "protocol.h"
 
 /* Source: http://beej.us/guide/bgnet/output/html/singlepage/bgnet.html */
-int send_all(int targetSocket, unsigned char *buf, int *len) {
+int send_all(int targetSocket, unsigned char *buf, int *len, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int total = 0; /* How many bytes we've sent */
 	int bytesleft = *len; /* How many we have left to send */
-	int n;
+	int n, res;
+	fd_set readfds, errorfds;
+	struct timeval tv;
 
 	while (total < *len) {
+		if (interuptSocket != -1){
+			init_FD_sets(&readfds, NULL, &errorfds);
+			FD_SET(interuptSocket, &readfds);
+			FD_SET(interuptSocket, &errorfds);
+			tv.tv_sec = 0;
+			tv.tv_usec = 0;
+
+			select(interuptSocket, &readfds, NULL, &errorfds, &tv);
+
+			if (FD_ISSET(interuptSocket, &errorfds)){
+				return (ERROR);
+			}
+			if (FD_ISSET(interuptSocket, &readfds)){
+				res = interuptFunction(interuptSocket);
+				/* check for error */
+			}
+		}
+
 		/* No signal raised on error closed socket, instead it is recognized by return value */
 		n = send(targetSocket, buf + total, bytesleft, MSG_NOSIGNAL);
 		if (n == -1) {
@@ -26,13 +46,33 @@ int send_all(int targetSocket, unsigned char *buf, int *len) {
 	return (n == -1 ? ERROR : 0); /* return ERROR on failure, 0 on success */
 }
 
-int recv_all(int sourceSocket, unsigned char *buf, int *len) {
+int recv_all(int sourceSocket, unsigned char *buf, int *len, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int total = 0; /* How many bytes we've sent */
 	int bytesleft = *len; /* How many we have left to send */
-	int n;
+	int n, res;
+	fd_set readfds, errorfds;
+	struct timeval tv;
 
 	while (total < *len) {
+		if (interuptSocket != -1){
+			init_FD_sets(&readfds, NULL, &errorfds);
+			FD_SET(interuptSocket, &readfds);
+			FD_SET(interuptSocket, &errorfds);
+			tv.tv_sec = 0;
+			tv.tv_usec = 0;
+
+			select(interuptSocket, &readfds, NULL, &errorfds, &tv);
+
+			if (FD_ISSET(interuptSocket, &errorfds)){
+				return (ERROR);
+			}
+			if (FD_ISSET(interuptSocket, &readfds)){
+				res = interuptFunction(interuptSocket);
+				/* check for error */
+			}
+		}
+
 		n = recv(sourceSocket, buf + total, bytesleft, 0);
 		if (n == -1 || n == 0) {
 			break;
@@ -59,14 +99,13 @@ void free_non_blocking_message(NonBlockingMessage *nbMessage) {
 }
 
 /* Sends an attachment to stream */
-int send_attachment(int targetSocket, Attachment *attachment) {
+int send_attachment(int targetSocket, Attachment *attachment, int interuptSocket, InteruptFunction interuptFunction) {
 	int i, bytesToSend, netAttachmentSize, res;
 	unsigned char buffer[FILE_CHUNK_SIZE];
 
 	bytesToSend = sizeof(int);
 	netAttachmentSize = htonl(attachment->size);
-	res = send_all(targetSocket, (unsigned char*) &(netAttachmentSize),
-			&bytesToSend);
+	res = send_all(targetSocket, (unsigned char*) &(netAttachmentSize),	&bytesToSend, interuptSocket, interuptFunction);
 	if (res == ERROR) {
 		return ERROR;
 	}
@@ -77,7 +116,7 @@ int send_attachment(int targetSocket, Attachment *attachment) {
 		if ((bytesToSend != FILE_CHUNK_SIZE) && (bytesToSend != (attachment->size - i))) {
 			return ERROR;
 		}
-		res = send_all(targetSocket, buffer, &bytesToSend);
+		res = send_all(targetSocket, buffer, &bytesToSend, interuptSocket, interuptFunction);
 		if (res == ERROR) {
 			return ERROR;
 		}
@@ -106,8 +145,7 @@ unsigned char get_message_header(Message *message) {
 }
 
 /* Send a message to the stream with attachments */
-int send_message_with_attachments(int targetSocket, Message *message,
-		Mail *mail) {
+int send_message_with_attachments(int targetSocket, Message *message, Mail *mail, int interuptSocket, InteruptFunction interuptFunction) {
 	int bytesToSend;
 	int res, i, netMessageSize;
 	unsigned char header;
@@ -116,7 +154,7 @@ int send_message_with_attachments(int targetSocket, Message *message,
 	/* Sending header */
 	bytesToSend = 1;
 	header = get_message_header(message);
-	res = send_all(targetSocket, &header, &bytesToSend);
+	res = send_all(targetSocket, &header, &bytesToSend, interuptSocket, interuptFunction);
 
 	/* In case of an error we stop before sending the data */
 	if (res == ERROR) {
@@ -130,8 +168,7 @@ int send_message_with_attachments(int targetSocket, Message *message,
 	if (message->messageSize == VariedSize) {
 		bytesToSend = sizeof(int);
 		netMessageSize = htonl(message->size);
-		res = send_all(targetSocket, (unsigned char*) &(netMessageSize),
-				&bytesToSend);
+		res = send_all(targetSocket, (unsigned char*) &(netMessageSize), &bytesToSend, interuptSocket, interuptFunction);
 		if (res == ERROR) {
 			free_message(message);
 			return (ERROR);
@@ -143,7 +180,7 @@ int send_message_with_attachments(int targetSocket, Message *message,
 		bytesToSend = message->size;
 		bytesToSend -= calculate_attachemnts_size(mail);
 
-		res = send_all(targetSocket, message->data, &bytesToSend);
+		res = send_all(targetSocket, message->data, &bytesToSend, interuptSocket, interuptFunction);
 		if (res == ERROR) {
 			free_message(message);
 			return (ERROR);
@@ -154,7 +191,7 @@ int send_message_with_attachments(int targetSocket, Message *message,
 		/* Checking if there are files to send */
 		if (mail != NULL) {
 			for (i = 0; i < mail->numAttachments; i++) {
-				res = send_attachment(targetSocket, mail->attachments + i);
+				res = send_attachment(targetSocket, mail->attachments + i, interuptSocket, interuptFunction);
 				if (res == ERROR) {
 					free_message(message);
 					return (ERROR);
@@ -170,8 +207,8 @@ int send_message_with_attachments(int targetSocket, Message *message,
 	return (res);
 }
 
-int send_message(int targetSocket, Message *message) {
-	return send_message_with_attachments(targetSocket, message, NULL);
+int send_message(int targetSocket, Message *message, int interuptSocket, InteruptFunction interuptFunction) {
+	return send_message_with_attachments(targetSocket, message, NULL, interuptSocket, interuptFunction);
 }
 
 void set_message_header(Message *message, unsigned char header) {
@@ -179,7 +216,7 @@ void set_message_header(Message *message, unsigned char header) {
 	message->messageSize = (header & MESSAGE_SIZE_MASK)>>5;
 }
 
-int recv_message(int sourceSocket, Message *message) {
+int recv_message(int sourceSocket, Message *message, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int bytesToRecv, netMessageSize;
 	int res;
@@ -190,7 +227,7 @@ int recv_message(int sourceSocket, Message *message) {
 
 	/* Receiving header */
 	bytesToRecv = 1;
-	res = recv_all(sourceSocket, &header, &bytesToRecv);
+	res = recv_all(sourceSocket, &header, &bytesToRecv, interuptSocket, interuptFunction);
 
 	/* In case of an error we stop before receiving the data */
 	if (res != 0) {
@@ -209,7 +246,8 @@ int recv_message(int sourceSocket, Message *message) {
 		bytesToRecv = message->size = 3;
 	} else if (message->messageSize == VariedSize) {
 		bytesToRecv = sizeof(int);
-		res = recv_all(sourceSocket, (unsigned char*)&(netMessageSize), &bytesToRecv);
+		res = recv_all(sourceSocket, (unsigned char*)&(netMessageSize), &bytesToRecv,
+					interuptSocket, interuptFunction);
 		message->size = ntohl(netMessageSize);
 		if (res != 0) {
 			return (res);
@@ -226,7 +264,7 @@ int recv_message(int sourceSocket, Message *message) {
 			return (ERROR);
 		}
 
-		res = recv_all(sourceSocket, message->data, &bytesToRecv);
+		res = recv_all(sourceSocket, message->data, &bytesToRecv, interuptSocket, interuptFunction);
 		if (res != 0) {
 			return (res);
 		} else {
@@ -490,11 +528,11 @@ int is_there_message_to_send(NonBlockingMessage *nbMessage) {
 	return (nbMessage->isPartial && nbMessage->messageInitialized);
 }
 
-int recv_typed_message(int socket, Message *message,
-		MessageType messageType) {
+int recv_typed_message(int socket, Message *message, MessageType messageType,
+					   int interuptSocket, InteruptFunction interuptFunction) {
 	int res;
 
-	res = recv_message(socket, message);
+	res = recv_message(socket, message, interuptSocket, interuptFunction);
 	if (res != 0) {
 		free_message(message);
 		return (res);
@@ -537,12 +575,12 @@ int prepare_string_from_message(char** str, Message* message) {
 	return (*str == NULL ? ERROR : 0);
 }
 
-int recv_string_from_message (int socket, char **str) {
+int recv_string_from_message (int socket, char **str, int interuptSocket, InteruptFunction interuptFunction) {
 
 	Message message;
 	int res;
 
-	res = recv_typed_message(socket, &message, String);
+	res = recv_typed_message(socket, &message, String, interuptSocket, interuptFunction);
 	if (res != 0) {
 		return (res);
 	}
@@ -584,7 +622,7 @@ void set_empty_message(NonBlockingMessage* nbMessage, MessageType type) {
 	nbMessage->messageInitialized = 1;
 }
 
-int send_empty_message(int socket, MessageType type) {
+int send_empty_message(int socket, MessageType type, int interuptSocket, InteruptFunction interuptFunction) {
 
 	Message message;
 	int res;
@@ -594,13 +632,13 @@ int send_empty_message(int socket, MessageType type) {
 	message.messageSize = ZeroSize;
 	message.size = 0;
 
-	res = send_message(socket, &message);
+	res = send_message(socket, &message, interuptSocket, interuptFunction);
 	free_message(&message);
 	return (res);
 }
 
-int send_quit_message(int socket) {
-	return (send_empty_message(socket, Quit));
+int send_quit_message(int socket, int interuptSocket, InteruptFunction interuptFunction) {
+	return (send_empty_message(socket, Quit, interuptSocket, interuptFunction));
 }
 
 int send_message_from_credentials(int socket, int chatSocket, char* userName, char* password) {
@@ -613,7 +651,7 @@ int send_message_from_credentials(int socket, int chatSocket, char* userName, ch
 		return (ERROR);
 	}
 
-	if ((res = send_message(socket, &message)) != 0) {
+	if ((res = send_message(socket, &message, -1, NULL)) != 0) {
 		return (res);
 	}
 
@@ -622,7 +660,7 @@ int send_message_from_credentials(int socket, int chatSocket, char* userName, ch
 		return (ERROR);
 	}
 	message.messageType = CredentialsChat;
-	if ((res = send_message(chatSocket, &message)) != 0) {
+	if ((res = send_message(chatSocket, &message, -1, NULL)) != 0) {
 		free_message(&message);
 		return (res);
 	}
@@ -657,12 +695,12 @@ void prepare_credentials_approve_message(NonBlockingMessage* nbMessage) {
 	set_empty_message(nbMessage, CredentialsApprove);
 }
 
-int recv_credentials_result(int socket, int *isLoggedIn) {
+int recv_credentials_result(int socket, int *isLoggedIn, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	res = recv_message(socket, &message);
+	res = recv_message(socket, &message, interuptSocket, interuptFunction);
 	if (res == 0) {
 		if (message.messageType == CredentialsApprove) {
 			*isLoggedIn = 1;
@@ -829,8 +867,8 @@ int prepare_message_from_inbox_content(Mail **mails, unsigned short mailAmount, 
 	return (0);
 }
 
-int send_show_inbox_message(int socket) {
-	return (send_empty_message(socket, ShowInbox));
+int send_show_inbox_message(int socket, int interuptSocket, InteruptFunction interuptFunction) {
+	return (send_empty_message(socket, ShowInbox, interuptSocket, interuptFunction));
 }
 
 int prepare_mail_header_from_message(Message *message, Mail *mail, int *offset) {
@@ -899,12 +937,13 @@ int prepare_inbox_content_from_message(Message *message, Mail **mails, unsigned 
 	return (0);
 }
 
-int recv_inbox_content_from_message(int socket, Mail **mails, unsigned short *mailAmount) {
+int recv_inbox_content_from_message(int socket, Mail **mails, unsigned short *mailAmount,
+									int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	res = recv_typed_message(socket, &message, InboxContent);
+	res = recv_typed_message(socket, &message, InboxContent, interuptSocket, interuptFunction);
 	if (res != 0) {
 		return (res);
 	}
@@ -933,7 +972,8 @@ int calculate_mail_size(Mail *mail) {
 	return (size);
 }
 
-int send_mail_id_message(int clientSocket, unsigned short mailID, Message* message, MessageType messageType) {
+int send_mail_id_message(int clientSocket, unsigned short mailID, Message* message, MessageType messageType,
+						 int interuptSocket, InteruptFunction interuptFunction) {
 
 	unsigned short netMailID;
 
@@ -948,15 +988,15 @@ int send_mail_id_message(int clientSocket, unsigned short mailID, Message* messa
 	netMailID = htons(mailID);
 	memcpy(message->data, &netMailID, message->size);
 
-	return (send_message(clientSocket, message));
+	return (send_message(clientSocket, message, interuptSocket, interuptFunction));
 }
 
-int send_get_mail_message(int socket, unsigned short mailID) {
+int send_get_mail_message(int socket, unsigned short mailID, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	res = send_mail_id_message(socket, mailID, &message, GetMail);
+	res = send_mail_id_message(socket, mailID, &message, GetMail, interuptSocket, interuptFunction);
 	free_message(&message);
 	return (res);
 }
@@ -1097,12 +1137,12 @@ int prepare_mail_from_message(Message *message, Mail *mail, int *offset) {
 	return (0);
 }
 
-int recv_mail_from_message(int socket, Mail *mail) {
+int recv_mail_from_message(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res, offset = 0;
 	Message message;
 
-	res = recv_typed_message(socket, &message, MailContent);
+	res = recv_typed_message(socket, &message, MailContent, interuptSocket, interuptFunction);
 	if (res != 0) {
 		return (res);
 	}
@@ -1112,8 +1152,8 @@ int recv_mail_from_message(int socket, Mail *mail) {
 	return (res);
 }
 
-int send_get_attachment_message(int socket, unsigned short mailID,
-		unsigned char attachmentID) {
+int send_get_attachment_message(int socket, unsigned short mailID, unsigned char attachmentID,
+								int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
@@ -1131,7 +1171,7 @@ int send_get_attachment_message(int socket, unsigned short mailID,
 	memcpy(message.data, &netMailID, sizeof(netMailID));
 	memcpy(message.data + sizeof(netMailID), &attachmentID, 1);
 
-	res = send_message(socket, &message);
+	res = send_message(socket, &message, interuptSocket, interuptFunction);
 	free_message(&message);
 	return (res);
 }
@@ -1229,12 +1269,13 @@ int prepare_attachment_file_from_message(Message *message, Attachment *attachmen
 	return (res);
 }
 
-int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath) {
+int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath,
+									  int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	res = recv_typed_message(socket, &message, AttachmentContent);
+	res = recv_typed_message(socket, &message, AttachmentContent, interuptSocket, interuptFunction);
 	if (res != 0) {
 		return (res);
 	}
@@ -1244,12 +1285,12 @@ int recv_attachment_file_from_message(int socket, Attachment *attachment, char* 
 	return (res);
 }
 
-int send_delete_mail_message(int socket, unsigned short mailID) {
+int send_delete_mail_message(int socket, unsigned short mailID, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	res = send_mail_id_message(socket, mailID, &message, DeleteMail);
+	res = send_mail_id_message(socket, mailID, &message, DeleteMail, interuptSocket, interuptFunction);
 	free_message(&message);
 	return (res);
 }
@@ -1258,12 +1299,12 @@ void prepare_delete_approve_message(NonBlockingMessage *nbMessage) {
 	set_empty_message(nbMessage, DeleteApprove);
 }
 
-int recv_delete_result(int socket) {
+int recv_delete_result(int socket, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	res = recv_typed_message(socket, &message, DeleteApprove);
+	res = recv_typed_message(socket, &message, DeleteApprove, interuptSocket, interuptFunction);
 	if (res != 0) {
 		return (res);
 	} else {
@@ -1272,11 +1313,11 @@ int recv_delete_result(int socket) {
 	}
 }
 
-int prepare_compose_message_from_mail(Mail *mail, Message *message) {
+int prepare_compose_message_from_mail(Mail *mail, Message *message, int isChatMessage) {
 
 	int offset = 0;
 
-	message->messageType = Compose;
+	message->messageType = isChatMessage ? ChatMessageSend : Compose;
 	message->size = calculate_mail_size(mail);
 	message->messageSize = VariedSize;
 	message->data = calloc(message->size, 1);
@@ -1294,21 +1335,38 @@ int prepare_compose_message_from_mail(Mail *mail, Message *message) {
 	return (0);
 }
 
-int send_compose_message_from_mail(int socket, Mail *mail) {
+int send_compose_message_from_mail(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	if (prepare_compose_message_from_mail(mail, &message) != 0) {
+	if (prepare_compose_message_from_mail(mail, &message, 0) != 0) {
 		return (ERROR);
 	}
 
-	if ((res = send_message_with_attachments(socket, &message, mail)) != 0) {
+	if ((res = send_message_with_attachments(socket, &message, mail, interuptSocket, interuptFunction)) != 0) {
 		return (res);
 	}
 
 	return (0);
 }
+
+int send_chat_from_mail(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction) {
+
+	int res;
+	Message message;
+
+	if (prepare_compose_message_from_mail(mail, &message, 1) != 0) {
+		return (ERROR);
+	}
+
+	if ((res = send_message_with_attachments(socket, &message, mail, interuptSocket, interuptFunction)) != 0) {
+		return (res);
+	}
+
+	return (0);
+}
+
 
 int prepare_mail_attachments_from_message(Message *message, Mail *mail, int *offset) {
 
@@ -1364,12 +1422,12 @@ void prepare_send_approve_message(NonBlockingMessage *nbMessage) {
 	set_empty_message(nbMessage, SendApprove);
 }
 
-int recv_send_result(int socket) {
+int recv_send_result(int socket, int interuptSocket, InteruptFunction interuptFuntion) {
 
 	int res;
 	Message message;
 
-	res = recv_typed_message(socket, &message, SendApprove);
+	res = recv_typed_message(socket, &message, SendApprove, interuptSocket, interuptFuntion);
 	if (res != 0) {
 		return (res);
 	} else {
@@ -1381,3 +1439,32 @@ int recv_send_result(int socket) {
 void prepare_invalid_command_message(NonBlockingMessage* nbMessage) {
 	set_empty_message(nbMessage, InvalidCommand);
 }
+
+int recv_chat_from_message(int socket, Mail *ChatMessage) {
+
+	int res, offset = 0;
+	Message message;
+
+	res = recv_typed_message(socket, &message, ChatMessageReceive, -1, NULL);
+	if (res != 0) {
+		return (res);
+	}
+
+	res = prepare_mail_from_message(&message, ChatMessage, &offset);
+	free_message(&message);
+	return (res);
+}
+
+int recv_chat_message_and_print(int socket){
+	Mail mail;
+	int res;
+
+	res = recv_chat_from_message(socket, &mail);
+	/* TODO: handle error */
+
+	printf("New message from %s:  %s",mail.sender, mail.body);
+	free_mail(&mail);
+	return (res);
+}
+
+
