@@ -50,7 +50,9 @@ typedef enum {
 	ShowOnlineUsers,
 	OnlineUsers,
 	ChatMessageSend,
-	ChatMessageReceive
+	ChatMessageReceive,
+	ChatMailConfirm,
+	ChatConfirm
 } MessageType;
 
 /* This enum is to represent common message size's */
@@ -111,10 +113,10 @@ int is_there_message_to_send(NonBlockingMessage *nbMessage);
 int prepare_message_from_string(char* str, NonBlockingMessage *nbMessage);
 
 /* Receive a string from a message */
-int recv_string_from_message (int socket, char **str, int interuptSocket, InteruptFunction interuptFunction);
+int recv_string_from_message(int socket, char **str, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send a quit message */
-int send_quit_message(int socket, int interuptSocket, InteruptFunction interuptFunction);
+int send_quit_message(int socket);
 
 /* Send a message containing credentials data */
 int send_message_from_credentials(int socket, int chatSocket, char* userName, char* password);
@@ -160,7 +162,7 @@ unsigned short prepare_mail_id_from_message(NonBlockingMessage *nbMessage, Messa
 void prepare_invalid_id_message(NonBlockingMessage *nbMessage);
 
 /* Prepares a message containing mail data not including its attachments */
-int prepare_message_from_mail(Mail *mail, NonBlockingMessage *nbMessage);
+int prepare_message_from_mail(Mail *mail, NonBlockingMessage *nbMessage, int isChat);
 
 /* Receive a message containing mail data not including its attachments */
 int recv_mail_from_message(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction);
@@ -191,10 +193,23 @@ int recv_delete_result(int socket, int interuptSocket, InteruptFunction interupt
 /* Send compose message from a mail, including all the attachments */
 int send_compose_message_from_mail(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction);
 
+/* Sends a chat message from a mail, ignoring non relevant fields */
 int send_chat_from_mail(int socket, Mail *mail, int interuptSocket, InteruptFunction interuptFunction);
+
+/* Receiving a chat message */
+int recv_chat_from_message(int socket, Mail *ChatMessage);
+
+/* Prepares a message for approving a mail was sent instead of a chat message */
+void prepare_chat_mail_confirm_message(NonBlockingMessage *nbMessage);
+
+/* Prepares a message for approving a chat message sent */
+void prepare_chat_confirm_message(NonBlockingMessage *nbMessage);
 
 /* Prepare mail data including attachments a compose message */
 int prepare_mail_from_compose_message(NonBlockingMessage *nbMessage, Mail **mail);
+
+/* Receive chat message result */
+int recv_chat_result(int socket, int *isMailSent, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Prepares send approve message */
 void prepare_send_approve_message(NonBlockingMessage *nbMessage);
@@ -203,8 +218,10 @@ void prepare_send_approve_message(NonBlockingMessage *nbMessage);
 int recv_send_result(int socket, int interuptSocket, InteruptFunction interuptFunction);
 
 /* Prepares invalid command message */
-void prepare_invalid_command_message(NonBlockingMessage* nbMessage);
+void prepare_invalid_command_message(NonBlockingMessage *nbMessage);
 
-int recv_chat_from_message(int socket, Mail *ChatMessage);
+/* Prepares a message containing online users names */
+int prepare_online_users_message(NonBlockingMessage *nbMessage, char **onlineUsersNames, int usersAmount);
 
-int recv_chat_message_and_print(int socket);
+/* Receive online users names */
+int recv_online_users(int socket, char*** onlineUsersNames, int *usersAmount, int interuptSocket, InteruptFunction interuptFunction);

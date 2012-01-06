@@ -454,7 +454,7 @@ int do_get_mail(User *curUser) {
 	if (mail == NULL) {
 		prepare_invalid_id_message(&(curUser->mainBuffer));
 	} else {
-		res = prepare_message_from_mail(mail, &(curUser->mainBuffer));
+		res = prepare_message_from_mail(mail, &(curUser->mainBuffer), 0);
 	}
 
 	return (res);
@@ -530,6 +530,16 @@ void do_invalid_message(NonBlockingMessage *nbMessage) {
 	prepare_invalid_command_message(nbMessage);
 }
 
+void release_chat_queue(ChatQueue *chatQueueHead) {
+	ChatQueue *cur;
+
+	while (chatQueueHead != NULL) {
+		cur = chatQueueHead;
+		chatQueueHead = cur->next;
+		free(cur);
+	}
+}
+
 /* Adds the chat message to the queue */
 int add_chat_message_to_queue(Mail *chatMessage, ChatQueue **chatQueueHead, User *fromUser, User *toUser) {
 
@@ -560,8 +570,7 @@ int add_chat_message_to_queue(Mail *chatMessage, ChatQueue **chatQueueHead, User
 		cur = prev->next;
 	}
 
-	/* TODO: make the function generic, so the type could be also ChatReceive */
-	res = prepare_message_from_mail(chatMessage, &(cur->chatBuffer));
+	res = prepare_message_from_mail(chatMessage, &(cur->chatBuffer), 1);
 	free_mail(chatMessage);
 	cur->toUser = toUser;
 	cur->fromUser = fromUser;
@@ -593,6 +602,11 @@ int do_chat_message_send(User *users, int usersAmount, User* curUser, ChatQueue 
 	} else {
 		if (!(toUser->isOnline)) {
 			res = add_mail_to_server(users, usersAmount, curUser->name, mail, 1);
+			if (res != 0) {
+				return (res);
+			}
+
+			prepare_chat_mail_confirm_message(&(curUser->mainBuffer));
 		} else {
 			/* Setting mail's sender */
 			res = set_mail_sender(curUser->name, mail);
@@ -604,6 +618,8 @@ int do_chat_message_send(User *users, int usersAmount, User* curUser, ChatQueue 
 			if (res != 0) {
 				return (res);
 			}
+
+			prepare_chat_confirm_message(&(curUser->mainBuffer));
 		}
 	}
 
@@ -660,9 +676,9 @@ int prepare_chat_messages(User *users, int usersAmount, ChatQueue **chatQueueHea
 	return (res);
 }
 
-int do_show_online_users(User *users, int usersAmount) {
+int do_show_online_users(User *users, int usersAmount, User *curUser) {
 
-	int i, onlineUsers;
+	int i, onlineUsers, res;
 	char **onlineUsersNames;
 
 	onlineUsers = 0;
@@ -685,7 +701,9 @@ int do_show_online_users(User *users, int usersAmount) {
 		}
 	}
 
-	/* TODO : send an array of strings, separated by \t */
+	res = prepare_online_users_message(&(curUser->mainBuffer), onlineUsersNames, usersAmount);
+	free(onlineUsersNames);
+	return (res);
 }
 
 /* Updates the unrecognized user status by its credential */
@@ -835,7 +853,7 @@ int handle_read_fds(fd_set* readfds, fd_set* writefds, int listenSocket, User *u
 					res = do_chat_message_send(users, usersAmount, users + i, chatQueueHead);
 					break;
 				case ShowOnlineUsers:
-					res = do_show_online_users(users, usersAmount);
+					res = do_show_online_users(users, usersAmount, users + i);
 					break;
 				default:
 					do_invalid_message(&(users[i].mainBuffer));
@@ -1023,15 +1041,18 @@ int main(int argc, char** argv) {
 			break;
 		}
 
-		/* TODO: handle retval */
-		prepare_chat_messages(users, usersAmount, &chatQueueHead);
+		res = prepare_chat_messages(users, usersAmount, &chatQueueHead);
+		res = handle_return_value(res);
+		if (res == ERROR) {
+			break;
+		}
 
 		handle_send_fds(&writefds, users, usersAmount, unrecognizedUsers, unrecognizedUsersInUse);
 
 	} while (1);
 
 	/* Releasing resources */
-	/* TODO: release chat queue */
+	release_chat_queue(chatQueueHead);
 	init_FD_sets(&readfds, &writefds, &errorfds);
 	free_unrecognized_users_array(unrecognizedUsers, unrecognizedUsersSize);
 	free_users_array(users, usersAmount);

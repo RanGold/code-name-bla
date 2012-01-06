@@ -4,32 +4,45 @@
 
 #include "protocol.h"
 
+/* Handles the interupt socket */
+int handle_interupt_socket(int interuptSocket, InteruptFunction interuptFunction) {
+
+	fd_set readfds, errorfds;
+	int res = 0;
+	struct timeval tv;
+
+	if (interuptSocket != -1 && interuptFunction != NULL) {
+		init_FD_sets(&readfds, NULL, &errorfds);
+		FD_SET(interuptSocket, &readfds);
+		FD_SET(interuptSocket, &errorfds);
+		tv.tv_sec = 0;
+		tv.tv_usec = 0;
+
+		select(interuptSocket, &readfds, NULL, &errorfds, &tv);
+
+		if (FD_ISSET(interuptSocket, &errorfds)){
+			return (ERROR);
+		}
+
+		if (FD_ISSET(interuptSocket, &readfds)){
+			res = interuptFunction(interuptSocket);
+		}
+	}
+
+	return (res);
+}
+
 /* Source: http://beej.us/guide/bgnet/output/html/singlepage/bgnet.html */
 int send_all(int targetSocket, unsigned char *buf, int *len, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int total = 0; /* How many bytes we've sent */
 	int bytesleft = *len; /* How many we have left to send */
-	int n, res;
-	fd_set readfds, errorfds;
-	struct timeval tv;
+	int n, res = 0;
 
 	while (total < *len) {
-		if (interuptSocket != -1){
-			init_FD_sets(&readfds, NULL, &errorfds);
-			FD_SET(interuptSocket, &readfds);
-			FD_SET(interuptSocket, &errorfds);
-			tv.tv_sec = 0;
-			tv.tv_usec = 0;
-
-			select(interuptSocket, &readfds, NULL, &errorfds, &tv);
-
-			if (FD_ISSET(interuptSocket, &errorfds)){
-				return (ERROR);
-			}
-			if (FD_ISSET(interuptSocket, &readfds)){
-				res = interuptFunction(interuptSocket);
-				/* check for error */
-			}
+		res = handle_interupt_socket(interuptSocket, interuptFunction);
+		if (res != 0) {
+			break;
 		}
 
 		/* No signal raised on error closed socket, instead it is recognized by return value */
@@ -43,34 +56,19 @@ int send_all(int targetSocket, unsigned char *buf, int *len, int interuptSocket,
 
 	*len = total; /* Return number actually sent here */
 
-	return (n == -1 ? ERROR : 0); /* return ERROR on failure, 0 on success */
+	return (res != 0 ? res : (n == -1 ? ERROR : 0)); /* return ERROR on failure, 0 on success */
 }
 
 int recv_all(int sourceSocket, unsigned char *buf, int *len, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int total = 0; /* How many bytes we've sent */
 	int bytesleft = *len; /* How many we have left to send */
-	int n, res;
-	fd_set readfds, errorfds;
-	struct timeval tv;
+	int n, res = 0;
 
 	while (total < *len) {
-		if (interuptSocket != -1){
-			init_FD_sets(&readfds, NULL, &errorfds);
-			FD_SET(interuptSocket, &readfds);
-			FD_SET(interuptSocket, &errorfds);
-			tv.tv_sec = 0;
-			tv.tv_usec = 0;
-
-			select(interuptSocket, &readfds, NULL, &errorfds, &tv);
-
-			if (FD_ISSET(interuptSocket, &errorfds)){
-				return (ERROR);
-			}
-			if (FD_ISSET(interuptSocket, &readfds)){
-				res = interuptFunction(interuptSocket);
-				/* check for error */
-			}
+		res = handle_interupt_socket(interuptSocket, interuptFunction);
+		if (res != 0) {
+			break;
 		}
 
 		n = recv(sourceSocket, buf + total, bytesleft, 0);
@@ -83,7 +81,7 @@ int recv_all(int sourceSocket, unsigned char *buf, int *len, int interuptSocket,
 
 	*len = total; /* Return number actually sent here */
 
-	return (n == -1 ? ERROR : (n == 0 ? ERROR_SOCKET_CLOSED : 0));
+	return (res != 0 ? res : (n == -1 ? ERROR : (n == 0 ? ERROR_SOCKET_CLOSED : 0)));
 }
 
 void free_message(Message *message) {
@@ -637,8 +635,8 @@ int send_empty_message(int socket, MessageType type, int interuptSocket, Interup
 	return (res);
 }
 
-int send_quit_message(int socket, int interuptSocket, InteruptFunction interuptFunction) {
-	return (send_empty_message(socket, Quit, interuptSocket, interuptFunction));
+int send_quit_message(int socket) {
+	return (send_empty_message(socket, Quit, -1, NULL));
 }
 
 int send_message_from_credentials(int socket, int chatSocket, char* userName, char* password) {
@@ -847,6 +845,7 @@ int prepare_message_from_inbox_content(Mail **mails, unsigned short mailAmount, 
 
 	nbMessage->message.data = (unsigned char*)calloc(nbMessage->message.size, 1);
 	if (nbMessage->message.data == NULL) {
+		free_non_blocking_message(nbMessage);
 		return (ERROR);
 	}
 
@@ -1045,13 +1044,13 @@ void insert_mail_contents_to_buffer(unsigned char *buffer, int *offset, Mail *ma
 	*offset += bodyLen;
 }
 
-int prepare_message_from_mail(Mail *mail, NonBlockingMessage *nbMessage) {
+int prepare_message_from_mail(Mail *mail, NonBlockingMessage *nbMessage, int isChat) {
 
 	int offset = 0;
 
 	nbMessage->isPartial = 1;
 	nbMessage->messageInitialized = 1;
-	nbMessage->message.messageType = MailContent;
+	nbMessage->message.messageType = isChat ? ChatMessageReceive : MailContent;
 	nbMessage->message.size = calculate_mail_size(mail);
 	nbMessage->message.messageSize = VariedSize;
 	nbMessage->message.data = calloc(nbMessage->message.size, 1);
@@ -1360,13 +1359,35 @@ int send_chat_from_mail(int socket, Mail *mail, int interuptSocket, InteruptFunc
 		return (ERROR);
 	}
 
-	if ((res = send_message_with_attachments(socket, &message, mail, interuptSocket, interuptFunction)) != 0) {
+	if ((res = send_message(socket, &message, interuptSocket, interuptFunction)) != 0) {
 		return (res);
 	}
 
 	return (0);
 }
 
+int recv_chat_from_message(int socket, Mail *ChatMessage) {
+
+	int res, offset = 0;
+	Message message;
+
+	res = recv_typed_message(socket, &message, ChatMessageReceive, -1, NULL);
+	if (res != 0) {
+		return (res);
+	}
+
+	res = prepare_mail_from_message(&message, ChatMessage, &offset);
+	free_message(&message);
+	return (res);
+}
+
+void prepare_chat_mail_confirm_message(NonBlockingMessage *nbMessage) {
+	set_empty_message(nbMessage, ChatMailConfirm);
+}
+
+void prepare_chat_confirm_message(NonBlockingMessage *nbMessage) {
+	set_empty_message(nbMessage, ChatConfirm);
+}
 
 int prepare_mail_attachments_from_message(Message *message, Mail *mail, int *offset) {
 
@@ -1418,16 +1439,37 @@ int prepare_mail_from_compose_message(NonBlockingMessage *nbMessage, Mail **mail
 	return (0);
 }
 
+int recv_chat_result(int socket, int *isMailSent, int interuptSocket, InteruptFunction interuptFunction) {
+	int res;
+	Message message;
+
+	res = recv_message(socket, &message, interuptSocket, interuptFunction);
+	if (res != 0) {
+		return (res);
+	} else {
+		if (message.messageType == ChatConfirm) {
+			*isMailSent = 0;
+		} else if (message.messageType == ChatMailConfirm) {
+			*isMailSent = 1;
+		} else {
+			res = ERROR_LOGICAL;
+		}
+
+		free_message(&message);
+		return (res);
+	}
+}
+
 void prepare_send_approve_message(NonBlockingMessage *nbMessage) {
 	set_empty_message(nbMessage, SendApprove);
 }
 
-int recv_send_result(int socket, int interuptSocket, InteruptFunction interuptFuntion) {
+int recv_send_result(int socket, int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	res = recv_typed_message(socket, &message, SendApprove, interuptSocket, interuptFuntion);
+	res = recv_typed_message(socket, &message, SendApprove, interuptSocket, interuptFunction);
 	if (res != 0) {
 		return (res);
 	} else {
@@ -1436,35 +1478,47 @@ int recv_send_result(int socket, int interuptSocket, InteruptFunction interuptFu
 	}
 }
 
-void prepare_invalid_command_message(NonBlockingMessage* nbMessage) {
+void prepare_invalid_command_message(NonBlockingMessage *nbMessage) {
 	set_empty_message(nbMessage, InvalidCommand);
 }
 
-int recv_chat_from_message(int socket, Mail *ChatMessage) {
+int prepare_online_users_message(NonBlockingMessage *nbMessage, char **onlineUsersNames, int usersAmount) {
 
-	int res, offset = 0;
-	Message message;
+	int i, concatSize, netUsersAmount;
 
-	res = recv_typed_message(socket, &message, ChatMessageReceive, -1, NULL);
-	if (res != 0) {
-		return (res);
+	concatSize = 0;
+	for (i = 0; i < usersAmount; i++) {
+		concatSize += strlen(onlineUsersNames[i]) + 1;
+	}
+	concatSize++;
+	concatSize += sizeof(netUsersAmount);
+
+	nbMessage->message.messageType = OnlineUsers;
+	nbMessage->message.messageSize = VariedSize;
+	nbMessage->message.size = concatSize;
+	nbMessage->isPartial = 1;
+	nbMessage->messageInitialized = 1;
+
+	nbMessage->message.data = calloc(concatSize, 1);
+	if (nbMessage->message.data == NULL) {
+		free_non_blocking_message(nbMessage);
+		return (ERROR);
 	}
 
-	res = prepare_mail_from_message(&message, ChatMessage, &offset);
-	free_message(&message);
-	return (res);
+	netUsersAmount = htonl(usersAmount);
+	memcpy(nbMessage->message.data, &netUsersAmount, sizeof(netUsersAmount));
+
+	for (i = 0; i < usersAmount; i++) {
+		strcat((char*)(nbMessage->message.data + sizeof(netUsersAmount)), onlineUsersNames[i]);
+
+		if (i < (usersAmount - 1)) {
+			strcat((char*)(nbMessage->message.data + sizeof(netUsersAmount)), "\t");
+		}
+	}
+
+	return (0);
 }
 
-int recv_chat_message_and_print(int socket){
-	Mail mail;
-	int res;
-
-	res = recv_chat_from_message(socket, &mail);
-	/* TODO: handle error */
-
-	printf("New message from %s:  %s",mail.sender, mail.body);
-	free_mail(&mail);
-	return (res);
+int recv_online_users(int socket, char*** onlineUsersNames, int *usersAmount, int interuptSocket, InteruptFunction interuptFunction) {
+	/* TODO:... */
 }
-
-
