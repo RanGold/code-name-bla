@@ -81,15 +81,15 @@ FILE* get_valid_file(char* fileName, char* mode) {
 }
 
 void init_FD_sets(fd_set *readfds, fd_set *writefds, fd_set *errorfds) {
-		if (readfds != NULL){
-			FD_ZERO(readfds);
-		}
-
-		if (writefds != NULL){
-			FD_ZERO(writefds);
-		}
-
-		if (errorfds != NULL){
-			FD_ZERO(errorfds);
-		}
+	if (readfds != NULL) {
+		FD_ZERO(readfds);
 	}
+
+	if (writefds != NULL) {
+		FD_ZERO(writefds);
+	}
+
+	if (errorfds != NULL) {
+		FD_ZERO(errorfds);
+	}
+}
