@@ -13,6 +13,7 @@
 #define COMPOSE_USAGE_MESSAGE "Expected:\nTo: <username,...>\nSubject: <subject>\nAttachments: [\"path\",..]\nText: <text>"
 #define INVALID_COMMAND_MESSAGE "Invalid command"
 #define CHAT_MESSAGE_FORMAT "New message from %s: %s\n"
+#define ONLINE_USERS "Online users: "
 
 /* Commands definitions */
 #define QUIT_MESSAGE "QUIT\n"
@@ -68,6 +69,16 @@ void print_mail(Mail *mail) {
 
 	printf("\nText: %s\n", mail->body);
 }
+
+void print_online_users(char **onlineUsersNames, int usersAmount){
+	int i;
+
+	printf(ONLINE_USERS);
+	for (i = 0; i < usersAmount; i++){
+		printf((i+1 == usersAmount ? "%s" : "%s,"), onlineUsersNames[i]);
+	}
+}
+
 
 /* count the number of occurrences of chr is str */
 int count_occurrences(char *str, char chr) {
@@ -234,8 +245,7 @@ int do_quit(int mainSocket, int chatSocket){
 	return (res);
 }
 
-int do_credentials(int mainSocket, int chatSocket, int *isLoggedIn, char *userName, char *password) {
-	char input[MAX_INPUT_LEN + 1];
+int do_credentials(int mainSocket, int chatSocket, int *isLoggedIn, char *userName, char *password, char *input) {
 	int res;
 
 	if ((sscanf(input, "User: %s", userName) + scanf("Password: %s", password)) != 2) {
@@ -439,7 +449,42 @@ int do_chat(int mainSocket, int chatSocket, char *toChat, char *textChat, char *
 }
 
 int do_show_online_users(int clientSocket, int chatSocket) {
-	/* TODO:... */
+	int res;
+	int usersAmount;
+	char **onlineUsersNames;
+
+	res = send_show_online_users(clientSocket, chatSocket, recv_chat_message_and_print);
+	if (res != 0) {
+		return (res);
+	}
+
+	res = recv_online_users(clientSocket, &onlineUsersNames, &usersAmount, chatSocket, recv_chat_message_and_print);
+	if (res != 0) {
+		if (onlineUsersNames != NULL) {
+			free_online_users_names(onlineUsersNames);
+			free(onlineUsersNames);
+		}
+		return (res);
+	}
+
+	print_online_users(onlineUsersNames, usersAmount);
+	free_online_users_names(onlineUsersNames);
+	free(onlineUsersNames);
+
+	return (res);
+}
+
+void refresh_sets(fd_set *readfds, fd_set *errorfds, int isLoggedIn, int *maxFd, int socket){
+	FD_ZERO(readfds);
+	FD_ZERO(errorfds);
+	FD_SET(STDIN_FILENO, readfds);
+	FD_SET(STDIN_FILENO, errorfds);
+	*maxFd = STDIN_FILENO + 1;
+	if (isLoggedIn){
+		FD_SET(socket, readfds);
+		FD_SET(socket, errorfds);
+		*maxFd = socket + 1;
+	}
 }
 
 int main(int argc, char** argv) {
@@ -524,20 +569,15 @@ int main(int argc, char** argv) {
 		free(stringMessage);
 	}
 
-	init_FD_sets(&readfds, NULL, &errorfds);
-	FD_SET(STDIN_FILENO, &readfds);
-	FD_SET(STDIN_FILENO, &errorfds);
-	maxFd = STDIN_FILENO;
-
 	do {
-		/* TODO: refresh fd sets and add chat to both */
+		refresh_sets(&readfds, &errorfds, isLoggedIn, &maxFd, chatSocket);
+
 		res = select(maxFd, &readfds, NULL, &errorfds, NULL);
 		res = handle_return_value(res);
 		if (res == ERROR) {
 			break;
 		}
 
-		/* TODO: what is this for? */
 		if ((FD_ISSET(STDIN_FILENO, &errorfds)) || (isLoggedIn && FD_ISSET(chatSocket, &errorfds))) {
 			/* TODO: check error */
 			break;
@@ -554,7 +594,7 @@ int main(int argc, char** argv) {
 				res = do_quit(clientSocket, chatSocket);
 				break;
 			} else if (!isLoggedIn) {
-				res = do_credentials(clientSocket, chatSocket, &isLoggedIn, userName, password);
+				res = do_credentials(clientSocket, chatSocket, &isLoggedIn, userName, password, input);
 				/* Flushing */
 				fgets(input, MAX_INPUT_LEN, stdin);
 			} else if (strcmp(input, SHOW_INBOX) == 0) {
@@ -580,6 +620,7 @@ int main(int argc, char** argv) {
 			if (res == ERROR) {
 				break;
 			}
+
 		}
 	} while (1);
 

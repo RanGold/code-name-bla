@@ -1519,6 +1519,57 @@ int prepare_online_users_message(NonBlockingMessage *nbMessage, char **onlineUse
 	return (0);
 }
 
+int prepare_online_users_from_message(Message *message, char ***onlineUsersNames, int *usersAmount){
+	int i;
+	char *allUsers, *userName;
+
+	memcpy(usersAmount, message->data, sizeof(int));
+
+	*onlineUsersNames = calloc(*usersAmount, sizeof(char*));
+	if (*onlineUsersNames == NULL){
+		return (ERROR);
+	}
+
+	allUsers = calloc(message->messageSize - sizeof(int), sizeof(char));
+	if (allUsers == NULL){
+		free(*onlineUsersNames);
+		return (ERROR);
+	}
+
+	memcpy(allUsers, message->data + sizeof(int), sizeof(char));
+
+	userName = strtok(allUsers,"\t");
+	i = -1;
+
+	while (userName != NULL && i++){
+		*onlineUsersNames[i] = userName;
+		strtok(allUsers, NULL);
+	}
+
+	return (0);
+}
+
+int send_show_online_users(int socket, int interuptSocket, InteruptFunction interuptFunction){
+	return (send_empty_message(socket, ShowOnlineUsers, interuptSocket, interuptFunction));
+}
+
+
 int recv_online_users(int socket, char*** onlineUsersNames, int *usersAmount, int interuptSocket, InteruptFunction interuptFunction) {
-	/* TODO:... */
+	int res;
+	Message message;
+
+	res = recv_typed_message(socket, &message, OnlineUsers, interuptSocket, interuptFunction);
+	if (res != 0) {
+		return (res);
+	}
+
+	res = prepare_online_users_from_message(&message, onlineUsersNames, usersAmount);
+	free_message(&message);
+	return (res);
+}
+
+void free_online_users_names(char **onlineUsersNames){
+	if (onlineUsersNames[0] != NULL){
+		free(onlineUsersNames[0]);
+	}
 }
