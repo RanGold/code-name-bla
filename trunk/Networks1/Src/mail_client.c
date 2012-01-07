@@ -22,7 +22,7 @@
 #define GET_ATTACHMENT "GET_ATTACHMENT "
 #define DELETE_MAIL "DELETE_MAIL "
 #define COMPOSE "COMPOSE\n"
-#define CHAT_MESSAGE "MSG: "
+#define CHAT_MESSAGE "MSG "
 #define SHOW_ONLINE_USERS "SHOW_ONLINE_USERS\n"
 
 /* General Messages */
@@ -129,7 +129,7 @@ int prepare_mail_from_compose_input(Mail *mail, char *curUser,
 	int i, res;
 	char* temp;
 
-	memset(mail, 0, sizeof(mail));
+	memset(mail, 0, sizeof(Mail));
 
 	/* Preparing empty sender (because server is aware of current sender */
 	mail->sender = calloc(1, 1);
@@ -518,7 +518,7 @@ int main(int argc, char** argv) {
 	}
 
 	/* Checking for address validity */
-	memset(&hints, 0, sizeof hints);
+	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	res = getaddrinfo(hostname, portString, &hints, &servinfo);
