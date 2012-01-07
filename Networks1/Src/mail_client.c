@@ -70,16 +70,6 @@ void print_mail(Mail *mail) {
 	printf("\nText: %s\n", mail->body);
 }
 
-void print_online_users(char **onlineUsersNames, int usersAmount){
-	int i;
-
-	printf(ONLINE_USERS);
-	for (i = 0; i < usersAmount; i++){
-		printf((i+1 == usersAmount ? "%s" : "%s,"), onlineUsersNames[i]);
-	}
-}
-
-
 /* count the number of occurrences of chr is str */
 int count_occurrences(char *str, char chr) {
 
@@ -448,10 +438,19 @@ int do_chat(int mainSocket, int chatSocket, char *toChat, char *textChat, char *
 	return (res);
 }
 
+void print_online_users(char **onlineUsersNames, int usersAmount) {
+	int i;
+
+	printf(ONLINE_USERS);
+	for (i = 0; i < usersAmount; i++) {
+		printf((i+1 == usersAmount ? "%s\n" : "%s,"), onlineUsersNames[i]);
+	}
+}
+
 int do_show_online_users(int clientSocket, int chatSocket) {
 	int res;
 	int usersAmount;
-	char **onlineUsersNames;
+	char **onlineUsersNames = NULL;
 
 	res = send_show_online_users(clientSocket, chatSocket, recv_chat_message_and_print);
 	if (res != 0) {
@@ -620,7 +619,6 @@ int main(int argc, char** argv) {
 			if (res == ERROR) {
 				break;
 			}
-
 		}
 	} while (1);
 
