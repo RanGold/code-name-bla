@@ -1490,7 +1490,6 @@ int prepare_online_users_message(NonBlockingMessage *nbMessage, char **onlineUse
 	for (i = 0; i < usersAmount; i++) {
 		concatSize += strlen(onlineUsersNames[i]) + 1;
 	}
-	concatSize++;
 	concatSize += sizeof(netUsersAmount);
 
 	nbMessage->message.messageType = OnlineUsers;
@@ -1519,40 +1518,40 @@ int prepare_online_users_message(NonBlockingMessage *nbMessage, char **onlineUse
 	return (0);
 }
 
+int send_show_online_users(int socket, int interuptSocket, InteruptFunction interuptFunction) {
+	return (send_empty_message(socket, ShowOnlineUsers, interuptSocket, interuptFunction));
+}
+
 int prepare_online_users_from_message(Message *message, char ***onlineUsersNames, int *usersAmount){
 	int i;
-	char *allUsers, *userName;
+	char *allUsers;
+	int netUsersAmount;
 
-	memcpy(usersAmount, message->data, sizeof(int));
+	memcpy(&netUsersAmount, message->data, sizeof(int));
+	*usersAmount = ntohl(netUsersAmount);
 
-	*onlineUsersNames = calloc(*usersAmount, sizeof(char*));
-	if (*onlineUsersNames == NULL){
-		return (ERROR);
-	}
+	if (*usersAmount > 0) {
+		*onlineUsersNames = calloc(*usersAmount, sizeof(char*));
+		if (*onlineUsersNames == NULL) {
+			return (ERROR);
+		}
 
-	allUsers = calloc(message->messageSize - sizeof(int), sizeof(char));
-	if (allUsers == NULL){
-		free(*onlineUsersNames);
-		return (ERROR);
-	}
+		allUsers = calloc(message->size - sizeof(netUsersAmount), sizeof(char));
+		if (allUsers == NULL) {
+			free(*onlineUsersNames);
+			return (ERROR);
+		}
 
-	memcpy(allUsers, message->data + sizeof(int), sizeof(char));
+		memcpy(allUsers, message->data + sizeof(netUsersAmount), message->size - sizeof(netUsersAmount));
 
-	userName = strtok(allUsers,"\t");
-	i = -1;
-
-	while (userName != NULL && i++){
-		*onlineUsersNames[i] = userName;
-		strtok(allUsers, NULL);
+		(*onlineUsersNames)[0] = strtok(allUsers, "\t");
+		for (i = 1; i < *usersAmount; i++) {
+			(*onlineUsersNames)[i] = strtok(NULL, "\t");
+		}
 	}
 
 	return (0);
 }
-
-int send_show_online_users(int socket, int interuptSocket, InteruptFunction interuptFunction){
-	return (send_empty_message(socket, ShowOnlineUsers, interuptSocket, interuptFunction));
-}
-
 
 int recv_online_users(int socket, char*** onlineUsersNames, int *usersAmount, int interuptSocket, InteruptFunction interuptFunction) {
 	int res;
@@ -1568,7 +1567,7 @@ int recv_online_users(int socket, char*** onlineUsersNames, int *usersAmount, in
 	return (res);
 }
 
-void free_online_users_names(char **onlineUsersNames){
+void free_online_users_names(char **onlineUsersNames) {
 	if (onlineUsersNames[0] != NULL){
 		free(onlineUsersNames[0]);
 	}

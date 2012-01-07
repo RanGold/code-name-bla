@@ -433,6 +433,7 @@ int do_show_inbox(User* user) {
 	int res;
 
 	prepare_client_ids(user);
+	free_non_blocking_message(&(user->mainBuffer));
 	res = prepare_message_from_inbox_content(user->mails, user->mailsUsed,
 			&(user->mainBuffer));
 
@@ -690,6 +691,7 @@ int do_show_online_users(User *users, int usersAmount, User *curUser) {
 
 	onlineUsersNames = calloc(onlineUsers, sizeof(char*));
 	if (onlineUsersNames == NULL) {
+		free_non_blocking_message(&(curUser->mainBuffer));
 		return (ERROR);
 	}
 
@@ -701,6 +703,7 @@ int do_show_online_users(User *users, int usersAmount, User *curUser) {
 		}
 	}
 
+	free_non_blocking_message(&(curUser->mainBuffer));
 	res = prepare_online_users_message(&(curUser->mainBuffer), onlineUsersNames, onlineUsers);
 	free(onlineUsersNames);
 	return (res);
@@ -723,17 +726,17 @@ void do_handle_credentials(UnrecognizedUser *unrecognizedUser, User* users, int 
 	} else {
 
 		if (messageType == CredentialsMain) {
+			curUser->mainSocket = unrecognizedUser->socket;
 			if (curUser->chatSocket != -1) {
 				curUser->isOnline = 1;
 				prepare_credentials_approve_message(&(curUser->mainBuffer));
 			}
-			curUser->mainSocket = unrecognizedUser->socket;
 		} else {
+			curUser->chatSocket = unrecognizedUser->socket;
 			if (curUser->mainSocket != -1) {
 				curUser->isOnline = 1;
 				prepare_credentials_approve_message(&(curUser->mainBuffer));
 			}
-			curUser->chatSocket = unrecognizedUser->socket;
 		}
 
 		remove_unrecognized_user(unrecognizedUser);
