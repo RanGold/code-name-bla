@@ -1074,7 +1074,7 @@ int prepare_mail_from_message(Message *message, Mail *mail, int *offset) {
 	int i;
 	int attachmentNameLen, recipientLen, bodyLength;
 
-	memset(mail, 0, sizeof(mail));
+	memset(mail, 0, sizeof(Mail));
 
 	if (prepare_mail_header_from_message(message, mail, offset) != 0) {
 		free_mail(mail);
