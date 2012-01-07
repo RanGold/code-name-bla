@@ -29,7 +29,7 @@
 #define CONNECTION_SUCCEED_MESSAGE "Connected to server\n"
 #define ATTACHMENT_SAVE_MESSAGE "‫‪Attachment saved‬‬\n"
 #define MAIL_SENT_MESSAGE "Mail sent\n"
-#define CHAT_MAIL_SENT_MESSAGE "User is offline, message sent as mail"
+#define CHAT_MAIL_SENT_MESSAGE "User is offline, message sent as mail\n"
 
 #include "common.h"
 #include "protocol.h"
@@ -250,7 +250,7 @@ int do_credentials(int mainSocket, int chatSocket, int *isLoggedIn, char *userNa
 		if (res != 0) {
 			return (res);
 		} else {
-			if (isLoggedIn) {
+			if (*isLoggedIn) {
 				printf(CONNECTION_SUCCEED_MESSAGE);
 			} else {
 				print_error_message(WRONG_CREDENTIALS_MESSAGE);
