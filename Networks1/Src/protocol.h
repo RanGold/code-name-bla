@@ -225,3 +225,10 @@ int prepare_online_users_message(NonBlockingMessage *nbMessage, char **onlineUse
 
 /* Receive online users names */
 int recv_online_users(int socket, char*** onlineUsersNames, int *usersAmount, int interuptSocket, InteruptFunction interuptFunction);
+
+/* Send a show online message */
+int send_show_online_users(int socket, int interuptSocket, InteruptFunction interuptFunction);
+
+int prepare_online_users_from_message(Message *message, char ***onlineUsersNames, int *usersAmount);
+
+void free_online_users_names(char **onlineUsersNames);

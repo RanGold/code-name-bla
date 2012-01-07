@@ -701,7 +701,7 @@ int do_show_online_users(User *users, int usersAmount, User *curUser) {
 		}
 	}
 
-	res = prepare_online_users_message(&(curUser->mainBuffer), onlineUsersNames, usersAmount);
+	res = prepare_online_users_message(&(curUser->mainBuffer), onlineUsersNames, onlineUsers);
 	free(onlineUsersNames);
 	return (res);
 }
