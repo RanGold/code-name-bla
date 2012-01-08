@@ -1,0 +1,112 @@
+User: amir
+Password: 123
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+SHOW_INBOX
+GET_MAIL 20
+GET_ATTACHMENT 5 2 "~/"
+DELETE_MAIL 2
+SHOW_INBOX
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments:
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+SHOW_INBOX
+DELETE_MAIL 3
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+SHOW_INBOX
+COMPOSE
+To: ran,amir
+Subject: the users file
+Attachments: "~/users"
+Text: sababa
+SHOW_INBOX
+
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG amir: this is amir
+MSG ran: this is amir
+MSG ran: this is amir
+QUIT
