@@ -236,7 +236,7 @@ int do_quit(int mainSocket, int chatSocket){
 }
 
 int do_credentials(int mainSocket, int chatSocket, int *isLoggedIn, char *userName, char *password, char *input) {
-	int res;
+	int res = 0;
 
 	if ((sscanf(input, "User: %s", userName) + scanf("Password: %s", password)) != 2) {
 		print_error_message(CREDENTIALS_USAGE_MESSAGE);
@@ -383,6 +383,7 @@ int do_compose(int mainSocket, int chatSocket, char *userName){
 
 	if (res == 1) {
 		print_error_message(COMPOSE_USAGE_MESSAGE);
+		res = 0;
 	} else {
 		res = prepare_mail_from_compose_input(&mail, userName, tempRecipients,
 				tempSubject, tempAttachments, tempText);
