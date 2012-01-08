@@ -580,7 +580,7 @@ int main(int argc, char** argv) {
 		}
 
 		if ((FD_ISSET(STDIN_FILENO, &errorfds)) || (isLoggedIn && FD_ISSET(chatSocket, &errorfds))) {
-			/* TODO: check error */
+			print_error();
 			break;
 		}
 
