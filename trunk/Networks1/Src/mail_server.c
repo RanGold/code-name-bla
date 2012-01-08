@@ -814,7 +814,6 @@ void handle_error_fds(fd_set* readfds, fd_set* writefds, fd_set* errorfds, User 
 	}
 }
 
-/* TODO : because of read and write by stages there could be a situation where both are possible */
 int handle_read_fds(fd_set* readfds, fd_set* writefds, int listenSocket, User *users, int usersAmount,
 		UnrecognizedUser **unrecognizedUsers, int *unrecognizedUsersAmount, int *unrecognizedUsersSize,
 		ChatQueue **chatQueueHead) {
@@ -912,14 +911,14 @@ void handle_send_fds(fd_set *writefds, User *users, int userAmounts,
 
 	for (i = 0; i < userAmounts; i++){
 		if (users[i].isOnline) {
-			if (FD_ISSET(users[i].mainSocket, writefds)  && is_there_message_to_send(&(users[i].mainBuffer))) {
+			if (FD_ISSET(users[i].mainSocket, writefds) && is_there_message_to_send(&(users[i].mainBuffer))) {
 				res = send_non_blocking_message(users[i].mainSocket, &(users[i].mainBuffer));
 				if (res != 0) {
 					disconnect_user(users + i);
 				}
 			}
 
-			if (FD_ISSET(users[i].chatSocket, writefds)  && is_there_message_to_send(&(users[i].chatBuffer))) {
+			if (FD_ISSET(users[i].chatSocket, writefds) && is_there_message_to_send(&(users[i].chatBuffer))) {
 				res = send_non_blocking_message(users[i].chatSocket, &(users[i].chatBuffer));
 				if (res != 0) {
 					disconnect_user(users + i);
