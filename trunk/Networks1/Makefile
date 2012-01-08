@@ -1,4 +1,4 @@
-binFLAGS = -pedantic-errors -c -Wall -I ./Src/ -g -o ./Bin/
+binFLAGS = -pedantic-errors -c -Wall -I ./Src/ -g -o ./
 testBinFLAGS = -ansi -pedantic-errors -c -Wall -I ./Src/ -g -o ./Bin/Tests/
 exeFLAGS = -ansi -pedantic-errors -Wall -Werror -g -lm -o 
 testExeFLAGS = -ansi -pedantic-errors -Wall -Werror -g -lm -o ./Misc/Tests/
@@ -12,22 +12,22 @@ testclean:
 all: $(allExe)
 
 clean:
-	-rm ./Bin/*.o $(allExe)
+	-rm ./*.o $(allExe)
 
 mail_client: common.o protocol.o mail_client.o
-	gcc $(exeFLAGS)mail_client ./Bin/common.o ./Bin/protocol.o ./Bin/mail_client.o
+	gcc $(exeFLAGS)mail_client ./common.o ./protocol.o ./mail_client.o
 
 mail_server: common.o protocol.o mail_server.o
-	gcc $(exeFLAGS)mail_server ./Bin/common.o ./Bin/protocol.o ./Bin/mail_server.o 
+	gcc $(exeFLAGS)mail_server ./common.o ./protocol.o ./mail_server.o 
 
 mail_client.o:
-	gcc $(binFLAGS)mail_client.o ./Src/mail_client.c
+	gcc $(binFLAGS)mail_client.o ./mail_client.c
 
 mail_server.o:
-	gcc $(binFLAGS)mail_server.o ./Src/mail_server.c
+	gcc $(binFLAGS)mail_server.o ./mail_server.c
 
 protocol.o:
-	gcc $(binFLAGS)protocol.o ./Src/protocol.c
+	gcc $(binFLAGS)protocol.o ./protocol.c
 	
 common.o:
-	gcc $(binFLAGS)common.o ./Src/common.c
+	gcc $(binFLAGS)common.o ./common.c
