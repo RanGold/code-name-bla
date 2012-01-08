@@ -299,6 +299,7 @@ int do_get_mail(int mainSocket, int chatSocket, unsigned short mailID){
 		return (res);
 	}
 
+	memset(&mail, 0, sizeof(Mail));
 	res = recv_mail_from_message(mainSocket, &mail, chatSocket, recv_chat_message_and_print);
 	if (res != 0) {
 		free_mail(&mail);

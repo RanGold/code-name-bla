@@ -442,7 +442,7 @@ int do_show_inbox(User* user) {
 
 /* Prepares the buffer with the mail for the send phase */
 int do_get_mail(User *curUser) {
-	int res;
+	int res = 0;
 	Mail *mail;
 	unsigned short mailID;
 
@@ -463,7 +463,7 @@ int do_get_mail(User *curUser) {
 
 /* Prepares the buffer with the attachment for the send phase */
 int do_get_attachment(User *curUser) {
-	int res;
+	int res = 0;
 	unsigned short mailID;
 	unsigned char attachmentID;
 	Attachment *attachment;
@@ -485,7 +485,7 @@ int do_get_attachment(User *curUser) {
 
 /* Deletes the mail and prepares the buffer with the result of the deletion for the send phase */
 int do_delete_mail(User *curUser) {
-	int res;
+	int res = 0;
 	unsigned short mailID;
 
 	mailID = prepare_mail_id_from_message(&(curUser->mainBuffer), DeleteMail);
@@ -498,6 +498,7 @@ int do_delete_mail(User *curUser) {
 		return (res);
 	} else if (res == ERROR_INVALID_ID) {
 		prepare_invalid_id_message(&(curUser->mainBuffer));
+		res = 0;
 	} else {
 		prepare_delete_approve_message(&(curUser->mainBuffer));
 	}
@@ -589,11 +590,13 @@ int do_chat_message_send(User *users, int usersAmount, User* curUser, ChatQueue 
 	/* This actually performs the same for any mail, and chat message is a mail */
 	res = prepare_mail_from_compose_message(&(curUser->mainBuffer), &mail);
 	if (res == ERROR) {
+		free(mail);
 		return (res);
 	}
 
 	if (mail->numRecipients != 1) {
 		do_invalid_message(&(curUser->mainBuffer));
+		free(mail);
 		return (0);
 	}
 
@@ -612,14 +615,17 @@ int do_chat_message_send(User *users, int usersAmount, User* curUser, ChatQueue 
 			/* Setting mail's sender */
 			res = set_mail_sender(curUser->name, mail);
 			if (res != 0) {
+				free_mail(mail);
 				return (res);
 			}
 
 			res = add_chat_message_to_queue(mail, chatQueueHead, curUser, toUser);
 			if (res != 0) {
+				free_mail(mail);
 				return (res);
 			}
 
+			free_mail(mail);
 			prepare_chat_confirm_message(&(curUser->mainBuffer));
 		}
 	}
