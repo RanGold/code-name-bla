@@ -18,7 +18,10 @@ int handle_interupt_socket(int interuptSocket, InteruptFunction interuptFunction
 		tv.tv_sec = 0;
 		tv.tv_usec = 0;
 
-		select(interuptSocket + 1, &readfds, NULL, &errorfds, &tv);
+		res = select(interuptSocket + 1, &readfds, NULL, &errorfds, &tv);
+		if (res != 0) {
+			return (ERROR);
+		}
 
 		if (FD_ISSET(interuptSocket, &errorfds)){
 			return (ERROR);
