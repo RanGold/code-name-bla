@@ -217,8 +217,12 @@ void set_message_header(Message *message, unsigned char header) {
 	message->messageSize = (header & MESSAGE_SIZE_MASK)>>5;
 }
 
-int recv_message(int sourceSocket, Message *message, int interuptSocket, InteruptFunction interuptFunction) {
+int recv_attachment(int sourceSocket, Message *message, FILE **file, char *path,
+		int interuptSocket, InteruptFunction interuptFunction) {
+	return (0);
+}
 
+int recv_message_with_attachment(int sourceSocket, Message *message, char *path, int interuptSocket, InteruptFunction interuptFunction) {
 	int bytesToRecv, netMessageSize;
 	int res;
 	unsigned char header;
@@ -274,6 +278,10 @@ int recv_message(int sourceSocket, Message *message, int interuptSocket, Interup
 	}
 
 	return (len == (message->size + 1) ? 0 : ERROR_LOGICAL);
+}
+
+int recv_message(int sourceSocket, Message *message, int interuptSocket, InteruptFunction interuptFunction) {
+	return (recv_message_with_attachment(sourceSocket, message, NULL, interuptSocket, interuptFunction));
 }
 
 int send_header(int targetSocket, NonBlockingMessage *nbMessage){
