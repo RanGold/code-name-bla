@@ -24,7 +24,7 @@ int handle_return_value(int res) {
 		res = ERROR;
 	}
 
-	return res;
+	return (res);
 }
 
 int get_absolute_path(char* relPath, char** absPath) {

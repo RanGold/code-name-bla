@@ -2,7 +2,7 @@ binFLAGS = -pedantic-errors -c -Wall -I ./Src/ -g -o ./
 exeFLAGS = -ansi -pedantic-errors -Wall -Werror -g -lm -o 
 allExe = mail_server mail_client
 
-all: $(allExe)
+all: clean $(allExe)
 
 clean:
 	-rm ./*.o $(allExe)
