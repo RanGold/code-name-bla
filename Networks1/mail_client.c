@@ -318,9 +318,6 @@ int do_get_mail(int mainSocket, int chatSocket, unsigned short mailID){
 int do_get_attachment(int mainSocket, int chatSocket, unsigned char attachmentID,
 		char * attachmentPath, unsigned short mailID){
 	int res;
-	Attachment attachment;
-
-	memset(&attachment, 0, sizeof(Attachment));
 
 	/* Converting to unsigned char while zeroing the non important bits */
 	res = send_get_attachment_message(mainSocket, mailID, attachmentID, chatSocket, recv_chat_message_and_print);
@@ -328,10 +325,9 @@ int do_get_attachment(int mainSocket, int chatSocket, unsigned char attachmentID
 		return (res);
 	}
 
-	res = recv_attachment_file_from_message(mainSocket, &attachment, attachmentPath,
+	res = recv_attachment_file_from_message(mainSocket, attachmentPath,
 			chatSocket, recv_chat_message_and_print);
 	if (res != 0) {
-		free_attachment(&attachment);
 		return (res);
 	} else {
 		printf(ATTACHMENT_SAVE_MESSAGE);

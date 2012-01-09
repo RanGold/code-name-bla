@@ -107,8 +107,8 @@ int send_attachment(int targetSocket, Attachment *attachment, int interuptSocket
 	bytesToSend = sizeof(int);
 	netAttachmentSize = htonl(attachment->size);
 	res = send_all(targetSocket, (unsigned char*) &(netAttachmentSize),	&bytesToSend, interuptSocket, interuptFunction);
-	if (res == ERROR) {
-		return ERROR;
+	if (res != 0) {
+		return (res);
 	}
 
 	res = fseek(attachment->file, 0, SEEK_SET);
@@ -118,12 +118,12 @@ int send_attachment(int targetSocket, Attachment *attachment, int interuptSocket
 			return ERROR;
 		}
 		res = send_all(targetSocket, buffer, &bytesToSend, interuptSocket, interuptFunction);
-		if (res == ERROR) {
-			return ERROR;
+		if (res != 0) {
+			return (res);
 		}
 	}
 
-	return 0;
+	return (0);
 }
 
 int calculate_attachemnts_size(Mail *mail) {
@@ -158,9 +158,9 @@ int send_message_with_attachments(int targetSocket, Message *message, Mail *mail
 	res = send_all(targetSocket, &header, &bytesToSend, interuptSocket, interuptFunction);
 
 	/* In case of an error we stop before sending the data */
-	if (res == ERROR) {
+	if (res != 0) {
 		free_message(message);
-		return (ERROR);
+		return (res);
 	} else {
 		len = bytesToSend;
 	}
@@ -170,9 +170,9 @@ int send_message_with_attachments(int targetSocket, Message *message, Mail *mail
 		bytesToSend = sizeof(int);
 		netMessageSize = htonl(message->size);
 		res = send_all(targetSocket, (unsigned char*) &(netMessageSize), &bytesToSend, interuptSocket, interuptFunction);
-		if (res == ERROR) {
+		if (res != 0) {
 			free_message(message);
-			return (ERROR);
+			return (res);
 		}
 	}
 
@@ -182,9 +182,9 @@ int send_message_with_attachments(int targetSocket, Message *message, Mail *mail
 		bytesToSend -= calculate_attachemnts_size(mail);
 
 		res = send_all(targetSocket, message->data, &bytesToSend, interuptSocket, interuptFunction);
-		if (res == ERROR) {
+		if (res != 0) {
 			free_message(message);
-			return (ERROR);
+			return (res);
 		} else {
 			len += bytesToSend;
 		}
@@ -193,9 +193,9 @@ int send_message_with_attachments(int targetSocket, Message *message, Mail *mail
 		if (mail != NULL) {
 			for (i = 0; i < mail->numAttachments; i++) {
 				res = send_attachment(targetSocket, mail->attachments + i, interuptSocket, interuptFunction);
-				if (res == ERROR) {
+				if (res != 0) {
 					free_message(message);
-					return (ERROR);
+					return (res);
 				} else {
 					len += mail->attachments[i].size + sizeof(int);
 				}
@@ -217,16 +217,80 @@ void set_message_header(Message *message, unsigned char header) {
 	message->messageSize = (header & MESSAGE_SIZE_MASK)>>5;
 }
 
-int recv_attachment(int sourceSocket, Message *message, FILE **file, char *path,
+int recv_attachment(int sourceSocket, Message *message, char *path, Attachment *attachment,
 		int interuptSocket, InteruptFunction interuptFunction) {
+
+	int netAttachmentFileNameLength, attachmentFileNameLength, i, bytesToReceive, res;
+	unsigned char buffer[FILE_CHUNK_SIZE];
+	char *fullPath;
+
+	memset(attachment, 0, sizeof(Attachment));
+
+	bytesToReceive = sizeof(netAttachmentFileNameLength);
+	res = recv_all(sourceSocket, (unsigned char*)&netAttachmentFileNameLength, &bytesToReceive,
+			interuptSocket, interuptFunction);
+	if (res != 0) {
+		return (res);
+	}
+	attachmentFileNameLength = ntohl(netAttachmentFileNameLength);
+
+	attachment->fileName = calloc(attachmentFileNameLength + 1, 1);
+	if (attachment->fileName == NULL) {
+		return (ERROR);
+	}
+
+	bytesToReceive = attachmentFileNameLength;
+	res = recv_all(sourceSocket, (unsigned char*)attachment->fileName, &bytesToReceive,
+			interuptSocket, interuptFunction);
+	if (res != 0) {
+		free_attachment(attachment);
+		return (res);
+	}
+
+	fullPath = calloc(attachmentFileNameLength + strlen(path) + 1, 1);
+	if (fullPath == NULL) {
+		free_attachment(attachment);
+		return (res);
+	}
+
+	strcat(fullPath, path);
+	strcat(fullPath, attachment->fileName);
+	attachment->file = get_valid_file(fullPath, "w");
+	if (attachment->file == NULL) {
+		free(fullPath);
+		free_attachment(attachment);
+		return(ERROR);
+	}
+	free(fullPath);
+
+	attachment->size = message->size - sizeof(attachmentFileNameLength) - attachmentFileNameLength;
+
+	res = fseek(attachment->file, 0, SEEK_SET);
+	for (i = 0; i < attachment->size; i += FILE_CHUNK_SIZE) {
+		bytesToReceive = (i + FILE_CHUNK_SIZE > attachment->size ? attachment->size - i : FILE_CHUNK_SIZE);
+		res = recv_all(sourceSocket, buffer, &bytesToReceive, interuptSocket, interuptFunction);
+		if (res != 0) {
+			free_attachment(attachment);
+			return(ERROR);
+		}
+
+		res = fwrite(buffer, 1, bytesToReceive, attachment->file);
+		if (res != bytesToReceive) {
+			free_attachment(attachment);
+			return (ERROR);
+		}
+	}
+
 	return (0);
 }
 
-int recv_message_with_attachment(int sourceSocket, Message *message, char *path, int interuptSocket, InteruptFunction interuptFunction) {
+int recv_message_with_attachment(int sourceSocket, Message *message, char *path,
+		int interuptSocket, InteruptFunction interuptFunction) {
 	int bytesToRecv, netMessageSize;
 	int res;
 	unsigned char header;
 	unsigned int len = 0;
+	Attachment *attachment;
 
 	memset(message, 0, sizeof(Message));
 
@@ -253,10 +317,10 @@ int recv_message_with_attachment(int sourceSocket, Message *message, char *path,
 		bytesToRecv = sizeof(int);
 		res = recv_all(sourceSocket, (unsigned char*)&(netMessageSize), &bytesToRecv,
 					interuptSocket, interuptFunction);
-		message->size = ntohl(netMessageSize);
 		if (res != 0) {
 			return (res);
 		}
+		message->size = ntohl(netMessageSize);
 		bytesToRecv = message->size;
 	} else {
 		return (ERROR_LOGICAL);
@@ -264,16 +328,37 @@ int recv_message_with_attachment(int sourceSocket, Message *message, char *path,
 
 	/* Receiving data */
 	if (bytesToRecv > 0) {
-		message->data = calloc(message->size, 1);
-		if (message->data == NULL) {
-			return (ERROR);
-		}
+		if (message->messageType == AttachmentContent) {
+			if (path == NULL) {
+				return (ERROR);
+			} else {
+				attachment = calloc(1, sizeof(Attachment));
+				if (attachment == NULL) {
+					return (ERROR);
+				}
 
-		res = recv_all(sourceSocket, message->data, &bytesToRecv, interuptSocket, interuptFunction);
-		if (res != 0) {
-			return (res);
+				res = recv_attachment(sourceSocket, message, path, attachment, interuptSocket, interuptFunction);
+				if (res != 0) {
+					free(attachment);
+					return (res);
+				} else {
+					len += attachment->size + strlen(attachment->fileName) + sizeof(int);
+					free_attachment(attachment);
+					free(attachment);
+				}
+			}
 		} else {
-			len += bytesToRecv;
+			message->data = calloc(message->size, 1);
+			if (message->data == NULL) {
+				return (ERROR);
+			}
+
+			res = recv_all(sourceSocket, message->data, &bytesToRecv, interuptSocket, interuptFunction);
+			if (res != 0) {
+				return (res);
+			} else {
+				len += bytesToRecv;
+			}
 		}
 	}
 
@@ -1204,93 +1289,44 @@ void prepare_mail_attachment_id_from_message(NonBlockingMessage *nbMessage, unsi
 
 int prepare_message_from_attachment(Attachment *attachment, NonBlockingMessage *nbMessage) {
 
+	int netAttachmentFileNameLength;
+
 	nbMessage->isPartial = 1;
 	nbMessage->messageInitialized = 1;
 	nbMessage->message.messageType = AttachmentContent;
 	nbMessage->message.messageSize = VariedSize;
-	nbMessage->message.size = attachment->size + strlen(attachment->fileName) + 1;
+	nbMessage->message.size = attachment->size + sizeof(netAttachmentFileNameLength) + strlen(attachment->fileName);
 	nbMessage->message.data = calloc(nbMessage->message.size, 1);
 	if (nbMessage->message.data == NULL) {
 		free_non_blocking_message(nbMessage);
 		return (ERROR);
 	}
-	memcpy(nbMessage->message.data, attachment->fileName, strlen(attachment->fileName) + 1);
-	memcpy(nbMessage->message.data + strlen(attachment->fileName) + 1, attachment->data, attachment->size);
+
+	netAttachmentFileNameLength = htonl(strlen(attachment->fileName));
+	memcpy(nbMessage->message.data, &netAttachmentFileNameLength, sizeof(netAttachmentFileNameLength));
+	memcpy(nbMessage->message.data + sizeof(netAttachmentFileNameLength), attachment->fileName, strlen(attachment->fileName));
+	memcpy(nbMessage->message.data + sizeof(netAttachmentFileNameLength) + strlen(attachment->fileName), attachment->data, attachment->size);
 
 	return (0);
 }
 
-/* Save a file from an attachment struct to a certain path */
-int save_file_from_attachment(Attachment *attachment, char *savePath) {
-
-	FILE *file;
-	char *path;
-	int pathLength;
-	size_t writenBytes;
-
-	/* Preparing full path */
-	pathLength = strlen(attachment->fileName) + strlen(savePath) + 1;
-	path = (char*)calloc(pathLength, 1);
-	if (path == NULL) {
-		return (ERROR);
-	}
-	strcat(path, savePath);
-	strcat(path, attachment->fileName);
-
-	file = get_valid_file(path, "w");
-	if (file == NULL) {
-		free(path);
-		return(ERROR);
-	}
-
-	writenBytes = fwrite(attachment->data, 1, attachment->size, file);
-	if (writenBytes != attachment->size) {
-		fclose(file);
-		free(path);
-		return(ERROR);
-	}
-
-	fclose(file);
-	free(path);
-	return (0);
-}
-
-int prepare_attachment_file_from_message(Message *message, Attachment *attachment, char* attachmentPath) {
-
-	int fileNameLength, res = 0;
-
-	memset(attachment, 0, sizeof(Attachment));
-
-	/* Getting the attachment's name from the message */
-	fileNameLength = strlen((char*) message->data) + 1;
-	attachment->fileName = (char*) calloc(fileNameLength, 1);
-	if (attachment->fileName == NULL) {
-		return (ERROR);
-	}
-	memcpy(attachment->fileName, message->data, fileNameLength);
-
-	/* Getting the attachment's data from the message */
-	attachment->size = message->size - fileNameLength;
-	attachment->data = message->data + fileNameLength;
-	res = save_file_from_attachment(attachment, attachmentPath);
-
-	attachment->data = NULL;
-	free_attachment(attachment);
-	return (res);
-}
-
-int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath,
+int recv_attachment_file_from_message(int socket, char* attachmentPath,
 									  int interuptSocket, InteruptFunction interuptFunction) {
 
 	int res;
 	Message message;
 
-	res = recv_typed_message(socket, &message, AttachmentContent, interuptSocket, interuptFunction);
+	res = recv_message_with_attachment(socket, &message, attachmentPath, interuptSocket, interuptFunction);
 	if (res != 0) {
+		free_message(&message);
 		return (res);
 	}
 
-	res = prepare_attachment_file_from_message(&message, attachment, attachmentPath);
+	if (message.messageType != AttachmentContent) {
+		free_message(&message);
+		return (ERROR_LOGICAL);
+	}
+
 	free_message(&message);
 	return (res);
 }
