@@ -178,7 +178,7 @@ void prepare_mail_attachment_id_from_message(NonBlockingMessage *nbMessage, unsi
 int prepare_message_from_attachment(Attachment *attachment, NonBlockingMessage *nbMessage);
 
 /* Receive an attachment data from message */
-int recv_attachment_file_from_message(int socket, Attachment *attachment, char* attachmentPath,
+int recv_attachment_file_from_message(int socket, char* attachmentPath,
 									  int interuptSocket, InteruptFunction interuptFunction);
 
 /* Send delete mail by id message */
