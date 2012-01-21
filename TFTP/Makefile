@@ -5,7 +5,7 @@ allExe = tftp-server
 all: clean $(allExe)
 
 clean:
-	-rm ./*.o $(allExe)
+	-rm -f ./*.o $(allExe)
 
 tftp-server: tftp-server.o
 	gcc $(exeFLAGS)tftp-server ./tftp-server.o 
