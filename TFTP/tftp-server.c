@@ -6,6 +6,8 @@
 #define MAX_MODE 20
 #define MAX_DATA_BLOCK_SIZE 512
 #define MODE_OCTET "octet"
+#define MAX_RETRIES 3
+#define TIMEOUT_USEC 100000
 
 /* Errors */
 #define ERROR -1
@@ -44,7 +46,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <time.h>
 #include <unistd.h>
 #include <string.h>
 #include <ctype.h>
@@ -109,36 +110,6 @@ int initiallize_listen_socket() {
 	}
 
 	return (listenSocket);
-}
-
-int get_tid() {
-	short tid;
-	int sendSocket, res;
-	struct sockaddr_in serverAddr;
-
-	/* Generate a random TID */
-	tid = (rand() % (UINT16_MAX - MAX_WELL_KNOWN_PORT)) + MAX_WELL_KNOWN_PORT + 1;
-
-	/* Create socket */
-	sendSocket = socket(PF_INET, SOCK_DGRAM, 0);
-	if (sendSocket == -1) {
-		return (ERROR);
-	}
-
-	/* Prepare address structure to bind listen socket */
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	serverAddr.sin_port = htons(tid);
-
-	/* Bind listen socket - no other processes can bind to this port */
-	res = bind(sendSocket, (struct sockaddr*) &serverAddr,
-			sizeof(serverAddr));
-	if (res == -1) {
-		close(sendSocket);
-		return (ERROR);
-	}
-
-	return (sendSocket);
 }
 
 void clear_packet(TFTPPacket *packet) {
@@ -218,7 +189,7 @@ int parse_error_packet(unsigned char *buffer, int bufferLen, TFTPPacket *packet)
 	return (res);
 }
 
-int parse_requset_packet(unsigned char *buffer, int bufferLen, TFTPPacket *packet) {
+int parse_request_packet(unsigned char *buffer, int bufferLen, TFTPPacket *packet) {
 	int fileNameLength, modeLength, i;
 
 	/* Getting file name */
@@ -269,7 +240,7 @@ int parse_packet(unsigned char* buffer, int bufferLen, TFTPPacket *packet) {
 		break;
 	case OP_RRQ:
 	case OP_WRQ:
-		res = parse_requset_packet(buffer, bufferLen, packet);
+		res = parse_request_packet(buffer, bufferLen, packet);
 		break;
 	default:
 		res = ERROR_LOGICAL;
@@ -329,7 +300,7 @@ int prepare_err_packet(unsigned char *buffer, TFTPPacket *packet) {
 	errorMsgLen = strlen(packet->errorMessege);
 	memcpy(buffer + sizeof(short), packet->errorMessege, errorMsgLen);
 
-	return (sizeof(short) + errorMsgLen + 1);
+	return (sizeof(short) + errorMsgLen + 2);
 }
 
 int send_packet(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, TFTPPacket *packet) {
@@ -454,15 +425,98 @@ FILE* get_valid_file(char* fileName, char* mode) {
 	return (file);
 }
 
+int get_EC_from_errno() {
+	switch (errno) {
+	case EACCES:
+		return (EC_FILE_ACCESS_VIOLATION);
+	case ENOENT:
+		return (EC_FILE_NOT_FOUND);
+	case EEXIST:
+		return (EC_FILE_EXISTS);
+	case ENOSPC:
+		return (EC_DISK_FULL);
+	default:
+		return (EC_NOT_DEFINED);
+	}
+}
+
+int handle_RRQ(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, TFTPPacket *packet) {
+	TFTPPacket sendPacket;
+	int res;
+	FILE *file;
+
+	if (strcmp(packet->mode, MODE_OCTET) != 0) {
+		send_general_error(fromSocket, clientAddr, addrLen, EC_ILLEGAL_OPERATION);
+		return (ERROR_LOGICAL);
+	}
+
+	file = get_valid_file(packet->fileName, "r");
+	/* Checking if an error has occurred and getting correct packet to send */
+	if (file == NULL) {
+		send_general_error(fromSocket, clientAddr, addrLen, get_EC_from_errno());
+		return (ERROR);
+	}
+
+	/* Preparing first packet to send */
+	clear_packet(&sendPacket);
+	sendPacket.opCode = OP_DATA;
+	sendPacket.blockNumber = 1;
+	fread(sendPacket.data, 1, MAX_DATA_BLOCK_SIZE, file);
+	if (ferror(file)) {
+		fclose(file);
+		send_general_error(fromSocket, clientAddr, addrLen, get_EC_from_errno());
+		return (ERROR);
+	}
+	fclose(file);
+
+	res = send_packet(fromSocket, clientAddr, addrLen, &sendPacket);
+	return (res);
+}
+
+int handle_WRQ(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, TFTPPacket *packet) {
+	TFTPPacket sendPacket;
+	int res;
+	FILE *file;
+
+	if (strcmp(packet->mode, MODE_OCTET) != 0) {
+		send_general_error(fromSocket, clientAddr, addrLen, EC_ILLEGAL_OPERATION);
+		return (ERROR_LOGICAL);
+	}
+
+	/* Checking if file exists */
+	file = get_valid_file(packet->fileName, "r");
+	if (file != NULL) {
+		fclose(file);
+		send_general_error(fromSocket, clientAddr, addrLen, EC_FILE_EXISTS);
+		return (ERROR);
+	}
+
+	file = get_valid_file(packet->fileName, "w");
+	/* Checking if an error has occurred and getting correct packet to send */
+	if (file == NULL) {
+		send_general_error(fromSocket, clientAddr, addrLen, get_EC_from_errno());
+		return (ERROR);
+	}
+	fclose(file);
+
+	/* Preparing first packet to send */
+	clear_packet(&sendPacket);
+	sendPacket.opCode = OP_ACK;
+	sendPacket.blockNumber = 0;
+
+	res = send_packet(fromSocket, clientAddr, addrLen, &sendPacket);
+	return (res);
+}
+
 int handle_initial_request(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, TFTPPacket *packet) {
 	int res;
 
-	/* TODO : read file and respond by proper error if NULL */
 	switch (packet->opCode) {
 	case OP_RRQ:
+		res = handle_RRQ(fromSocket, clientAddr, addrLen, packet);
 		break;
 	case OP_WRQ:
-
+		res = handle_WRQ(fromSocket, clientAddr, addrLen, packet);
 		break;
 	default:
 		res = send_general_error(fromSocket, clientAddr, addrLen, EC_ILLEGAL_OPERATION);
@@ -473,21 +527,29 @@ int handle_initial_request(int fromSocket, struct sockaddr_storage *clientAddr, 
 	return (res);
 }
 
+int wait_for_packet(int socket) {
+	/* TODO: use select for trying to get a packet */
+}
+
+int get_block_from_file(char* fileName, int blockNumber, unsigned char *buffer, unsigned int *bufferSize) {
+	/* TODO: */
+}
+
 int main(int argc, char** argv) {
 	int res, listenSocket;
 	int curConnetionSocket;
 	unsigned int addrLen;
 	struct sockaddr_storage clientAddr;
 	TFTPPacket packet;
+	char curFileName[MAX_FILE_NAME];
+	int isWrite;
+	int curBlock;
 
 	listenSocket = initiallize_listen_socket();
 	if (listenSocket == ERROR) {
 		print_error();
 		return (ERROR);
 	}
-
-	/* Initialize random seed */
-	srand(time(NULL));
 
 	while (1) {
 		/* Trying to receive an initial request */
@@ -498,10 +560,10 @@ int main(int argc, char** argv) {
 			return (ERROR);
 		}
 
-		/* Get a random TID */
-		curConnetionSocket = get_tid();
+		/* Get a socket to send with */
+		curConnetionSocket = socket(PF_INET, SOCK_DGRAM, 0);
 		handle_return_value(curConnetionSocket);
-		if (curConnetionSocket != 0) {
+		if (curConnetionSocket == -1) {
 			continue;
 		}
 
@@ -513,10 +575,24 @@ int main(int argc, char** argv) {
 		}
 
 		/* Checking if a valid request was made and handling its process initialization */
-		handle_initial_request(curConnetionSocket, &clientAddr, addrLen, &packet);
-		/* Handling a client */
-		/*while (1) {
-		}*/
+		res = handle_initial_request(curConnetionSocket, &clientAddr, addrLen, &packet);
+		if (res != 0) {
+			handle_return_value(res);
+		} else {
+			/* Preparing for client interaction */
+			isWrite = packet.opCode == OP_WRQ;
+			strcpy(curFileName, packet.fileName);
+			curBlock = isWrite ? 0 : 1;
+
+			/* Handling a client */
+			while (1) {
+				if (isWrite) {
+
+				} else {
+
+				}
+			}
+		}
 
 		close(curConnetionSocket);
 		curConnetionSocket = -1;
