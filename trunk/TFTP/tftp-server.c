@@ -1,3 +1,4 @@
+/* Program limits */
 #define MAX_PACKET_SIZE 2048
 #define DEAFULT_PORT 6900
 #define MAX_FILE_NAME 1024
@@ -5,8 +6,12 @@
 #define MAX_MODE 20
 #define MAX_DATA_BLOCK_SIZE 512
 #define MODE_OCTET "octet"
+
+/* Request configuration */
 #define MAX_RETRIES 3
 #define TIMEOUT_USEC 100000
+#define PACKET_READY 1
+#define PACKET_NOT_READY 0
 
 /* Errors */
 #define ERROR -1
@@ -52,6 +57,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 #include <netdb.h>
 
 typedef struct {
@@ -69,7 +75,7 @@ typedef struct {
 	unsigned int addrLen;
 	struct sockaddr_storage clientAddr;
 	FILE *file;
-	int sendSocket;
+	int clientSocket;
 } ClientData;
 
 void print_error() {
@@ -340,7 +346,7 @@ int send_packet(ClientData *clientData, TFTPPacket *packet) {
 		return (res);
 	}
 
-	res = sendto(clientData->sendSocket, buffer, messageSize, 0, (struct sockaddr*)(&(clientData->clientAddr)), clientData->addrLen);
+	res = sendto(clientData->clientSocket, buffer, messageSize, 0, (struct sockaddr*)(&(clientData->clientAddr)), clientData->addrLen);
 	return (res == -1 ? res : (res != messageSize ? ERROR_LOGICAL : 0));
 }
 
@@ -452,17 +458,45 @@ int get_EC_from_errno() {
 	}
 }
 
-int handle_RRQ(ClientData *clientData, TFTPPacket *packet) {
+int wait_for_packet(int clientSocket) {
+	fd_set readfds, errorfds;
+	int res = 0;
+	struct timeval tv;
+
+	/* Initializing sets */
+	FD_ZERO(&readfds);
+	FD_ZERO(&errorfds);
+	FD_SET(clientSocket, &readfds);
+	FD_SET(clientSocket, &errorfds);
+
+	tv.tv_sec = 0;
+	tv.tv_usec = TIMEOUT_USEC;
+
+	/* Waiting for incoming packet */
+	res = select(clientSocket + 1, &readfds, NULL, &errorfds, &tv);
+	if (res == -1) {
+		return (ERROR);
+	}
+
+	if (FD_ISSET(clientSocket, &errorfds)) {
+		return (ERROR);
+	}
+
+	if (FD_ISSET(clientSocket, &readfds)) {
+		res = PACKET_READY;
+	} else {
+		res = PACKET_NOT_READY;
+	}
+
+	return (res);
+}
+
+int handle_RRQ(ClientData *clientData, char *fileName) {
 	TFTPPacket sendPacket;
 	int res;
 	FILE *file;
 
-	if (strcmp(packet->mode, MODE_OCTET) != 0) {
-		send_general_error(clientData, EC_ILLEGAL_OPERATION);
-		return (ERROR_LOGICAL);
-	}
-
-	file = get_valid_file(packet->fileName, "r");
+	file = get_valid_file(fileName, "r");
 	/* Checking if an error has occurred and getting correct packet to send */
 	if (file == NULL) {
 		send_general_error(clientData, get_EC_from_errno());
@@ -485,50 +519,73 @@ int handle_RRQ(ClientData *clientData, TFTPPacket *packet) {
 	return (res);
 }
 
-int handle_WRQ(ClientData *clientData, TFTPPacket *packet) {
+int handle_WRQ(ClientData *clientData, char *fileName) {
 	TFTPPacket sendPacket;
 	int res;
-	FILE *file;
-
-	if (strcmp(packet->mode, MODE_OCTET) != 0) {
-		send_general_error(clientData, EC_ILLEGAL_OPERATION);
-		return (ERROR_LOGICAL);
-	}
+	int curBlockNumber = 0;
+	int retries;
 
 	/* Checking if file exists */
-	file = get_valid_file(packet->fileName, "r");
-	if (file != NULL) {
-		fclose(file);
+	clientData->file = get_valid_file(fileName, "r");
+	if (clientData->file != NULL) {
+		fclose(clientData->file);
 		send_general_error(clientData, EC_FILE_EXISTS);
 		return (ERROR_LOGICAL);
 	}
 
-	file = get_valid_file(packet->fileName, "w");
+	clientData->file = get_valid_file(fileName, "w");
 	/* Checking if an error has occurred and getting correct packet to send */
-	if (file == NULL) {
+	if (clientData->file == NULL) {
 		send_general_error(clientData, get_EC_from_errno());
 		return (ERROR);
 	}
-	fclose(file);
 
 	/* Preparing first packet to send */
 	clear_packet(&sendPacket);
 	sendPacket.opCode = OP_ACK;
-	sendPacket.blockNumber = 0;
-
+	sendPacket.blockNumber = curBlockNumber;
 	res = send_packet(clientData, &sendPacket);
+
+	/* Waiting for packet */
+	retries = 0;
+	while (retries < MAX_RETRIES) {
+		res = wait_for_packet(clientData->clientSocket);
+		if (res == PACKET_NOT_READY) {
+			retries++;
+		} else if (res == ERROR) {
+			fclose(clientData->file);
+
+			/* Attempting deleting partial file */
+			handle_return_value(remove(fileName) == 0 ? 0 : -1);
+			return (ERROR);
+		} else if (res == PACKET_READY) {
+			/* TODO : recv packet and check identity to current client */
+			/* TODO : parse packet and check correct type */
+			/*recv_packet()*/
+		}
+	}
+
+	fclose(clientData->file);
+
 	return (res);
 }
 
 int handle_request(ClientData *clientData, TFTPPacket *packet) {
 	int res;
 
+	if (packet->opCode == OP_RRQ || packet->opCode == OP_WRQ) {
+		if (strcmp(packet->mode, MODE_OCTET) != 0) {
+			send_general_error(clientData, EC_ILLEGAL_OPERATION);
+			return (ERROR_LOGICAL);
+		}
+	}
+
 	switch (packet->opCode) {
 	case OP_RRQ:
-		res = handle_RRQ(clientData, packet);
+		res = handle_RRQ(clientData, packet->fileName);
 		break;
 	case OP_WRQ:
-		res = handle_WRQ(clientData, packet);
+		res = handle_WRQ(clientData, packet->fileName);
 		break;
 	default:
 		res = send_general_error(clientData, EC_ILLEGAL_OPERATION);
@@ -537,10 +594,6 @@ int handle_request(ClientData *clientData, TFTPPacket *packet) {
 	}
 
 	return (res);
-}
-
-int wait_for_packet(int socket) {
-	/* TODO: use select for trying to get a packet */
 }
 
 int main(int argc, char** argv) {
@@ -566,9 +619,9 @@ int main(int argc, char** argv) {
 		}
 
 		/* Get a socket to send with */
-		clientData.sendSocket = socket(PF_INET, SOCK_DGRAM, 0);
-		handle_return_value(clientData.sendSocket);
-		if (clientData.sendSocket == -1) {
+		clientData.clientSocket = socket(PF_INET, SOCK_DGRAM, 0);
+		handle_return_value(clientData.clientSocket);
+		if (clientData.clientSocket == -1) {
 			continue;
 		}
 
@@ -585,7 +638,7 @@ int main(int argc, char** argv) {
 			handle_return_value(res);
 		}
 
-		close(clientData.sendSocket);
+		close(clientData.clientSocket);
 	}
 
 	/* Releasing resources */
