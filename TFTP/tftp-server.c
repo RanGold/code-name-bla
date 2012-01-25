@@ -1,6 +1,5 @@
 #define MAX_PACKET_SIZE 2048
 #define DEAFULT_PORT 6900
-#define MAX_WELL_KNOWN_PORT 1023
 #define MAX_FILE_NAME 1024
 #define MAX_ERROR_MESSAGE 1024
 #define MAX_MODE 20
@@ -66,6 +65,13 @@ typedef struct {
 	char errorMessege[MAX_ERROR_MESSAGE];
 } TFTPPacket;
 
+typedef struct {
+	unsigned int addrLen;
+	struct sockaddr_storage clientAddr;
+	FILE *file;
+	int sendSocket;
+} ClientData;
+
 void print_error() {
 	fprintf(stderr, "Error: %s\n", strerror(errno));
 }
@@ -118,6 +124,11 @@ void clear_packet(TFTPPacket *packet) {
 	packet->errorCode = -1;
 	packet->opCode = -1;
 	packet->dataSize = -1;
+}
+
+void clear_clientData(ClientData *clientData) {
+	memset(clientData, 0, sizeof(ClientData));
+	/* TODO : add additional ops */
 }
 
 short get_short_from_buffer(unsigned char *buffer) {
@@ -253,15 +264,15 @@ int parse_packet(unsigned char* buffer, int bufferLen, TFTPPacket *packet) {
 	return (res);
 }
 
-int recv_packet(int listenSocket, struct sockaddr_storage* from, unsigned int *addrLen, TFTPPacket *packet) {
+int recv_packet(int listenSocket, ClientData *clientData, TFTPPacket *packet) {
 	int res;
 	unsigned char buffer[MAX_PACKET_SIZE];
 
 	/* Receiving the next message */
-	memset(from, 0, sizeof(struct sockaddr_storage));
-	*addrLen = sizeof(struct sockaddr_storage);
+	clientData->addrLen = sizeof(struct sockaddr_storage);
+	memset(&(clientData->clientAddr), 0, clientData->addrLen);
 	res = recvfrom(listenSocket, buffer, MAX_PACKET_SIZE, 0,
-			(struct sockaddr*) from, addrLen);
+			(struct sockaddr*) &(clientData->clientAddr), &(clientData->addrLen));
 	if (res == -1) {
 		return (ERROR);
 	} else if (res == 0) {
@@ -300,25 +311,26 @@ int prepare_err_packet(unsigned char *buffer, TFTPPacket *packet) {
 	errorMsgLen = strlen(packet->errorMessege);
 	memcpy(buffer + sizeof(short), packet->errorMessege, errorMsgLen);
 
-	return (sizeof(short) + errorMsgLen + 2);
+	return (sizeof(short) + errorMsgLen + 1);
 }
 
-int send_packet(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, TFTPPacket *packet) {
+int send_packet(ClientData *clientData, TFTPPacket *packet) {
 	unsigned char buffer[MAX_PACKET_SIZE];
-	int messageSize, res = 0;
+	int messageSize = 2, res = 0;
 
+	memset(buffer, 0, sizeof(buffer));
 	insert_short_to_buffer(buffer, packet->opCode);
 
 	/* Handling only the valid options */
 	switch (packet->opCode) {
 	case OP_ACK:
-		messageSize = prepare_ack_packet(buffer + sizeof(short), packet);
+		messageSize += prepare_ack_packet(buffer + sizeof(short), packet);
 		break;
 	case OP_DATA:
-		messageSize = prepare_data_packet(buffer + sizeof(short), packet);
+		messageSize += prepare_data_packet(buffer + sizeof(short), packet);
 		break;
 	case OP_ERR:
-		messageSize = prepare_err_packet(buffer + sizeof(short), packet);
+		messageSize += prepare_err_packet(buffer + sizeof(short), packet);
 		break;
 	default:
 		res = ERROR_LOGICAL;
@@ -328,11 +340,11 @@ int send_packet(int fromSocket, struct sockaddr_storage *clientAddr, unsigned in
 		return (res);
 	}
 
-	res = sendto(fromSocket, buffer, messageSize, 0, (struct sockaddr*)clientAddr, addrLen);
+	res = sendto(clientData->sendSocket, buffer, messageSize, 0, (struct sockaddr*)(&(clientData->clientAddr)), clientData->addrLen);
 	return (res == -1 ? res : (res != messageSize ? ERROR_LOGICAL : 0));
 }
 
-int send_general_error(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, int errorCode) {
+int send_general_error(ClientData *clientData, int errorCode) {
 	TFTPPacket packet;
 
 	/* Preparing packet */
@@ -370,7 +382,7 @@ int send_general_error(int fromSocket, struct sockaddr_storage *clientAddr, unsi
 		strcpy(packet.errorMessege, EC_MSG_NOT_DEFINED);
 	}
 
-	return (send_packet(fromSocket, clientAddr, addrLen, &packet));
+	return (send_packet(clientData, &packet));
 }
 
 int get_absolute_path(char* relPath, char** absPath) {
@@ -440,20 +452,20 @@ int get_EC_from_errno() {
 	}
 }
 
-int handle_RRQ(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, TFTPPacket *packet) {
+int handle_RRQ(ClientData *clientData, TFTPPacket *packet) {
 	TFTPPacket sendPacket;
 	int res;
 	FILE *file;
 
 	if (strcmp(packet->mode, MODE_OCTET) != 0) {
-		send_general_error(fromSocket, clientAddr, addrLen, EC_ILLEGAL_OPERATION);
+		send_general_error(clientData, EC_ILLEGAL_OPERATION);
 		return (ERROR_LOGICAL);
 	}
 
 	file = get_valid_file(packet->fileName, "r");
 	/* Checking if an error has occurred and getting correct packet to send */
 	if (file == NULL) {
-		send_general_error(fromSocket, clientAddr, addrLen, get_EC_from_errno());
+		send_general_error(clientData, get_EC_from_errno());
 		return (ERROR);
 	}
 
@@ -464,22 +476,22 @@ int handle_RRQ(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int
 	fread(sendPacket.data, 1, MAX_DATA_BLOCK_SIZE, file);
 	if (ferror(file)) {
 		fclose(file);
-		send_general_error(fromSocket, clientAddr, addrLen, get_EC_from_errno());
+		send_general_error(clientData, get_EC_from_errno());
 		return (ERROR);
 	}
 	fclose(file);
 
-	res = send_packet(fromSocket, clientAddr, addrLen, &sendPacket);
+	res = send_packet(clientData, &sendPacket);
 	return (res);
 }
 
-int handle_WRQ(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, TFTPPacket *packet) {
+int handle_WRQ(ClientData *clientData, TFTPPacket *packet) {
 	TFTPPacket sendPacket;
 	int res;
 	FILE *file;
 
 	if (strcmp(packet->mode, MODE_OCTET) != 0) {
-		send_general_error(fromSocket, clientAddr, addrLen, EC_ILLEGAL_OPERATION);
+		send_general_error(clientData, EC_ILLEGAL_OPERATION);
 		return (ERROR_LOGICAL);
 	}
 
@@ -487,14 +499,14 @@ int handle_WRQ(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int
 	file = get_valid_file(packet->fileName, "r");
 	if (file != NULL) {
 		fclose(file);
-		send_general_error(fromSocket, clientAddr, addrLen, EC_FILE_EXISTS);
-		return (ERROR);
+		send_general_error(clientData, EC_FILE_EXISTS);
+		return (ERROR_LOGICAL);
 	}
 
 	file = get_valid_file(packet->fileName, "w");
 	/* Checking if an error has occurred and getting correct packet to send */
 	if (file == NULL) {
-		send_general_error(fromSocket, clientAddr, addrLen, get_EC_from_errno());
+		send_general_error(clientData, get_EC_from_errno());
 		return (ERROR);
 	}
 	fclose(file);
@@ -504,22 +516,22 @@ int handle_WRQ(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int
 	sendPacket.opCode = OP_ACK;
 	sendPacket.blockNumber = 0;
 
-	res = send_packet(fromSocket, clientAddr, addrLen, &sendPacket);
+	res = send_packet(clientData, &sendPacket);
 	return (res);
 }
 
-int handle_initial_request(int fromSocket, struct sockaddr_storage *clientAddr, unsigned int addrLen, TFTPPacket *packet) {
+int handle_request(ClientData *clientData, TFTPPacket *packet) {
 	int res;
 
 	switch (packet->opCode) {
 	case OP_RRQ:
-		res = handle_RRQ(fromSocket, clientAddr, addrLen, packet);
+		res = handle_RRQ(clientData, packet);
 		break;
 	case OP_WRQ:
-		res = handle_WRQ(fromSocket, clientAddr, addrLen, packet);
+		res = handle_WRQ(clientData, packet);
 		break;
 	default:
-		res = send_general_error(fromSocket, clientAddr, addrLen, EC_ILLEGAL_OPERATION);
+		res = send_general_error(clientData, EC_ILLEGAL_OPERATION);
 		handle_return_value(res);
 		res = ERROR_LOGICAL;
 	}
@@ -531,19 +543,10 @@ int wait_for_packet(int socket) {
 	/* TODO: use select for trying to get a packet */
 }
 
-int get_block_from_file(char* fileName, int blockNumber, unsigned char *buffer, unsigned int *bufferSize) {
-	/* TODO: */
-}
-
 int main(int argc, char** argv) {
 	int res, listenSocket;
-	int curConnetionSocket;
-	unsigned int addrLen;
-	struct sockaddr_storage clientAddr;
+	ClientData clientData;
 	TFTPPacket packet;
-	char curFileName[MAX_FILE_NAME];
-	int isWrite;
-	int curBlock;
 
 	listenSocket = initiallize_listen_socket();
 	if (listenSocket == ERROR) {
@@ -552,8 +555,10 @@ int main(int argc, char** argv) {
 	}
 
 	while (1) {
+		clear_clientData(&clientData);
+
 		/* Trying to receive an initial request */
-		res = recv_packet(listenSocket, &clientAddr, &addrLen, &packet);
+		res = recv_packet(listenSocket, &clientData, &packet);
 		res = handle_return_value(res);
 		if (res == ERROR) {
 			close(listenSocket);
@@ -561,41 +566,26 @@ int main(int argc, char** argv) {
 		}
 
 		/* Get a socket to send with */
-		curConnetionSocket = socket(PF_INET, SOCK_DGRAM, 0);
-		handle_return_value(curConnetionSocket);
-		if (curConnetionSocket == -1) {
+		clientData.sendSocket = socket(PF_INET, SOCK_DGRAM, 0);
+		handle_return_value(clientData.sendSocket);
+		if (clientData.sendSocket == -1) {
 			continue;
 		}
 
-		/* Handling general error on initial request */
+		/* Handling general error on request */
 		if (res != 0) {
-			res = send_general_error(curConnetionSocket, &clientAddr, addrLen, EC_NOT_DEFINED);
+			res = send_general_error(&clientData, EC_NOT_DEFINED);
 			handle_return_value(res);
 			continue;
 		}
 
 		/* Checking if a valid request was made and handling its process initialization */
-		res = handle_initial_request(curConnetionSocket, &clientAddr, addrLen, &packet);
+		res = handle_request(&clientData, &packet);
 		if (res != 0) {
 			handle_return_value(res);
-		} else {
-			/* Preparing for client interaction */
-			isWrite = packet.opCode == OP_WRQ;
-			strcpy(curFileName, packet.fileName);
-			curBlock = isWrite ? 0 : 1;
-
-			/* Handling a client */
-			while (1) {
-				if (isWrite) {
-
-				} else {
-
-				}
-			}
 		}
 
-		close(curConnetionSocket);
-		curConnetionSocket = -1;
+		close(clientData.sendSocket);
 	}
 
 	/* Releasing resources */
