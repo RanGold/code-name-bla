@@ -491,6 +491,15 @@ int wait_for_packet(int clientSocket) {
 	return (res);
 }
 
+int compare_sockaddr(struct sockaddr_storage *ss1, struct sockaddr_storage *ss2) {
+	struct sockaddr_in *si1 = (struct sockaddr_in*) ss1;
+	struct sockaddr_in *si2 = (struct sockaddr_in*) ss2;
+
+	/* Comparing address and port */
+	return ((memcmp(&(si1->sin_addr), &(si2->sin_addr), sizeof(struct in_addr)) == 0) &&
+			(memcmp(&(si1->sin_port), &(si2->sin_port), sizeof(in_port_t)) == 0));
+}
+
 int handle_RRQ(ClientData *clientData, char *fileName) {
 	TFTPPacket sendPacket;
 	int res;
@@ -520,10 +529,11 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 }
 
 int handle_WRQ(ClientData *clientData, char *fileName) {
-	TFTPPacket sendPacket;
+	TFTPPacket packet;
 	int res;
 	int curBlockNumber = 0;
 	int retries;
+	ClientData curSender;
 
 	/* Checking if file exists */
 	clientData->file = get_valid_file(fileName, "r");
@@ -541,10 +551,14 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 	}
 
 	/* Preparing first packet to send */
-	clear_packet(&sendPacket);
-	sendPacket.opCode = OP_ACK;
-	sendPacket.blockNumber = curBlockNumber;
-	res = send_packet(clientData, &sendPacket);
+	clear_packet(&packet);
+	packet.opCode = OP_ACK;
+	packet.blockNumber = curBlockNumber;
+	res = send_packet(clientData, &packet);
+	if (res != 0) {
+		fclose(clientData->file);
+		return (res);
+	}
 
 	/* Waiting for packet */
 	retries = 0;
@@ -559,13 +573,83 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 			handle_return_value(remove(fileName) == 0 ? 0 : -1);
 			return (ERROR);
 		} else if (res == PACKET_READY) {
-			/* TODO : recv packet and check identity to current client */
-			/* TODO : parse packet and check correct type */
-			/*recv_packet()*/
+			clear_clientData(&curSender);
+			res = recv_packet(clientData->clientSocket, &curSender, &packet);
+
+			/* Checking packet validity */
+			if (res != 0) {
+				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
+				retries++;
+			}
+			/* Checking if the data was received from the original client */
+			else if (!compare_sockaddr(&(clientData->clientAddr), &(curSender.clientAddr))) {
+				handle_return_value(send_general_error(clientData, EC_UNKNOWN_TID));
+				retries++;
+			}
+			/* Checking right kind of packet was received */
+			else if (packet.opCode != OP_DATA) {
+				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
+				retries++;
+			}
+			/* Checking if correct block was received */
+			else if (packet.blockNumber != (curBlockNumber + 1)) {
+				/* Re-sending last ack */
+				clear_packet(&packet);
+				packet.opCode = OP_ACK;
+				packet.blockNumber = curBlockNumber;
+				res = send_packet(clientData, &packet);
+				if (res != 0) {
+					fclose(clientData->file);
+					return (res);
+				}
+
+				retries++;
+			}
+			/* Got correct packet */
+			else {
+				retries = 0;
+				curBlockNumber++;
+
+				/* Writing data */
+				res = fwrite(packet.data, 1, packet.dataSize, clientData->file);
+				if (ferror(clientData->file)) {
+					fclose(clientData->file);
+					send_general_error(clientData, get_EC_from_errno());
+					return (ERROR);
+				} else if (res < packet.dataSize) {
+					fclose(clientData->file);
+					send_general_error(clientData, EC_NOT_DEFINED);
+					return (ERROR);
+				}
+
+				/* EOF */
+				if (packet.dataSize < MAX_DATA_BLOCK_SIZE) {
+					fclose(clientData->file);
+					break;
+					/* TODO : handle packet re-send if neccasary */
+				}
+
+				/* Sending ack */
+				clear_packet(&packet);
+				packet.opCode = OP_ACK;
+				packet.blockNumber = curBlockNumber;
+				res = send_packet(clientData, &packet);
+				if (res != 0) {
+					fclose(clientData->file);
+					return (res);
+				}
+			}
 		}
 	}
 
 	fclose(clientData->file);
+
+	/* Checking if stopped due to max retries */
+	if (retries >= MAX_RETRIES) {
+		/* Attempting deleting partial file */
+		handle_return_value(remove(fileName) == 0 ? 0 : -1);
+		return (ERROR_LOGICAL);
+	}
 
 	return (res);
 }
