@@ -65,7 +65,7 @@ typedef struct {
 	short opCode;
 	char fileName[MAX_FILE_NAME];
 	char mode[MAX_MODE];
-	short blockNumber;
+	unsigned short blockNumber;
 	unsigned char data[MAX_DATA_BLOCK_SIZE];
 	short errorCode;
 	char errorMessege[MAX_ERROR_MESSAGE];
@@ -531,7 +531,7 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 int handle_WRQ(ClientData *clientData, char *fileName) {
 	TFTPPacket packet;
 	int res;
-	int curBlockNumber = 0;
+	unsigned short curBlockNumber = 0;
 	int retries;
 	ClientData curSender;
 
@@ -592,7 +592,7 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 				retries++;
 			}
 			/* Checking if correct block was received */
-			else if (packet.blockNumber != (curBlockNumber + 1)) {
+			else if (packet.blockNumber != (unsigned short)(curBlockNumber + 1)) {
 				/* Re-sending last ack */
 				clear_packet(&packet);
 				packet.opCode = OP_ACK;
@@ -642,10 +642,9 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 		}
 	}
 
-	fclose(clientData->file);
-
 	/* Checking if stopped due to max retries */
 	if (retries >= MAX_RETRIES) {
+		fclose(clientData->file);
 		/* Attempting deleting partial file */
 		handle_return_value(remove(fileName) == 0 ? 0 : -1);
 		return (ERROR_LOGICAL);
