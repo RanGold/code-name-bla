@@ -434,12 +434,16 @@ FILE* get_valid_file(char* fileName, char* mode) {
 	/* Open, validate and return file */
 	file = fopen(absPath, mode);
 	if (file == NULL) {
-		free(absPath);
+		if (absPath != NULL){
+			free(absPath);
+		}
 		return (NULL);
 	}
 
 	/* Return file and free resources */
-	free(absPath);
+	if (absPath != NULL) {
+		free(absPath);
+	}
 	return (file);
 }
 
@@ -501,31 +505,115 @@ int compare_sockaddr(struct sockaddr_storage *ss1, struct sockaddr_storage *ss2)
 }
 
 int handle_RRQ(ClientData *clientData, char *fileName) {
-	TFTPPacket sendPacket;
-	int res;
-	FILE *file;
+	TFTPPacket sendPacket, recvPacket;
+	int res, retries;
+	unsigned short curBlockNumber = 1;
+	ClientData curSender;
 
-	file = get_valid_file(fileName, "r");
-	/* Checking if an error has occurred and getting correct packet to send */
-	if (file == NULL) {
-		send_general_error(clientData, get_EC_from_errno());
-		return (ERROR);
+	/* Checking if file exists */
+	clientData->file = get_valid_file(fileName, "r");
+	if (clientData->file  == NULL) {
+		send_general_error(clientData, EC_FILE_NOT_FOUND);
+		return (ERROR_LOGICAL);
 	}
 
 	/* Preparing first packet to send */
 	clear_packet(&sendPacket);
 	sendPacket.opCode = OP_DATA;
-	sendPacket.blockNumber = 1;
-	fread(sendPacket.data, 1, MAX_DATA_BLOCK_SIZE, file);
-	if (ferror(file)) {
-		fclose(file);
+	sendPacket.blockNumber = curBlockNumber;
+	sendPacket.dataSize = fread(sendPacket.data, 1, MAX_DATA_BLOCK_SIZE, clientData->file);
+	if (ferror(clientData->file)) {
+		fclose(clientData->file);
 		send_general_error(clientData, get_EC_from_errno());
 		return (ERROR);
 	}
-	fclose(file);
 
 	res = send_packet(clientData, &sendPacket);
+	if (res!= 0) {
+		fclose(clientData->file);
+		return (res);
+	}
+
+	retries = 0;
+	/* waiting for client's ACK's */
+	while (retries < MAX_RETRIES) {
+		res = wait_for_packet(clientData->clientSocket);
+		/* select' timeout reached */
+		if (res == PACKET_NOT_READY) {
+			retries++;
+		}
+		else if (res == ERROR){
+			fclose(clientData->file);
+			return (ERROR);
+		}
+		/* packet ready - get it */
+		else if (res == PACKET_READY) {
+			clear_clientData(&curSender);
+			res = recv_packet(clientData->clientSocket, &curSender, &recvPacket);
+
+			/* Checking packet validity */
+			if (res != 0) {
+				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
+				retries++;
+			}
+			/* Checking if the data was received from the original client */
+			else if (!compare_sockaddr(&(clientData->clientAddr), &(curSender.clientAddr))) {
+				handle_return_value(send_general_error(clientData, EC_UNKNOWN_TID));
+				retries++;
+			}
+			/* Checking right kind of packet was received - only ACK allowed */
+			else if (recvPacket.opCode != OP_ACK) {
+				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
+				retries++;
+			}
+			/* Checking if ACK recieved on the correct block */
+			else if (recvPacket.blockNumber != (unsigned short)(curBlockNumber)) {
+				/* Re-sending last packet */
+				res = send_packet(clientData, &sendPacket);
+				if (res != 0) {
+					fclose(clientData->file);
+					return (res);
+				}
+
+				retries++;
+			}
+
+			/* The packet is correct - send next block*/
+			else {
+				retries = 0;
+				curBlockNumber++;
+
+				sendPacket.blockNumber = curBlockNumber;
+				sendPacket.dataSize = fread(sendPacket.data, 1, MAX_DATA_BLOCK_SIZE, clientData->file);
+				if (ferror(clientData->file)) {
+					fclose(clientData->file);
+					send_general_error(clientData, get_EC_from_errno());
+					return (ERROR);
+				}
+
+				res = send_packet(clientData, &sendPacket);
+				if (res != 0) {
+					fclose(clientData->file);
+					return (res);
+				}
+
+				if (feof(clientData->file)) {
+					fclose(clientData->file);
+					break;
+				}
+			}
+		}
+
+	}
+	/* Checking if stopped due to max retries */
+	if (retries >= MAX_RETRIES) {
+		fclose(clientData->file);
+		return (ERROR_LOGICAL);
+	}
+
 	return (res);
+
+
 }
 
 int handle_WRQ(ClientData *clientData, char *fileName) {
@@ -534,6 +622,7 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 	unsigned short curBlockNumber = 0;
 	int retries;
 	ClientData curSender;
+	int dataSize;
 
 	/* Checking if file exists */
 	clientData->file = get_valid_file(fileName, "r");
@@ -622,12 +711,8 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 					return (ERROR);
 				}
 
-				/* EOF */
-				if (packet.dataSize < MAX_DATA_BLOCK_SIZE) {
-					fclose(clientData->file);
-					break;
-					/* TODO : handle packet re-send if neccasary */
-				}
+				dataSize = packet.dataSize;
+
 
 				/* Sending ack */
 				clear_packet(&packet);
@@ -638,6 +723,15 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 					fclose(clientData->file);
 					return (res);
 				}
+
+				/* EOF */
+				if (dataSize < MAX_DATA_BLOCK_SIZE) {
+					fclose(clientData->file);
+					 break;
+					/* TODO : handle packet re-send if neccasary */
+				}
+
+
 			}
 		}
 	}
