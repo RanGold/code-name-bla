@@ -535,10 +535,12 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 	}
 
 	retries = 0;
+
 	/* waiting for client's ACK's */
 	while (retries < MAX_RETRIES) {
 		res = wait_for_packet(clientData->clientSocket);
-		/* select' timeout reached */
+
+		/* select's timeout reached */
 		if (res == PACKET_NOT_READY) {
 			retries++;
 		}
@@ -577,7 +579,6 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 
 				retries++;
 			}
-
 			/* The packet is correct - send next block*/
 			else {
 				retries = 0;
@@ -603,8 +604,8 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 				}
 			}
 		}
-
 	}
+
 	/* Checking if stopped due to max retries */
 	if (retries >= MAX_RETRIES) {
 		fclose(clientData->file);
@@ -612,8 +613,6 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 	}
 
 	return (res);
-
-
 }
 
 int handle_WRQ(ClientData *clientData, char *fileName) {
@@ -713,7 +712,6 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 
 				dataSize = packet.dataSize;
 
-
 				/* Sending ack */
 				clear_packet(&packet);
 				packet.opCode = OP_ACK;
@@ -730,8 +728,6 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 					 break;
 					/* TODO : handle packet re-send if neccasary */
 				}
-
-
 			}
 		}
 	}
