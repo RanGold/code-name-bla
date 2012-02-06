@@ -615,6 +615,35 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 	return (res);
 }
 
+void WRQ_dallying(ClientData *clientData, TFTPPacket *ackPacket) {
+	int res;
+	ClientData curSender;
+	TFTPPacket packet;
+
+	res = wait_for_packet(clientData->clientSocket);
+	if (res == PACKET_READY) {
+		clear_clientData(&curSender);
+		res = recv_packet(clientData->clientSocket, &curSender, &packet);
+
+		/* Checking packet validity */
+		if (res != 0) {
+			handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
+		}
+		/* Checking if the data was received from the original client */
+		else if (!compare_sockaddr(&(clientData->clientAddr), &(curSender.clientAddr))) {
+			handle_return_value(send_general_error(clientData, EC_UNKNOWN_TID));
+		}
+		/* Checking right kind of packet was received */
+		else if (packet.opCode != OP_DATA) {
+			handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
+		}
+		/* Got data packet - resending last ack */
+		else {
+			handle_return_value(send_packet(clientData, &packet));
+		}
+	}
+}
+
 int handle_WRQ(ClientData *clientData, char *fileName) {
 	TFTPPacket packet;
 	int res;
@@ -688,6 +717,9 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 				res = send_packet(clientData, &packet);
 				if (res != 0) {
 					fclose(clientData->file);
+
+					/* Attempting deleting partial file */
+					handle_return_value(remove(fileName) == 0 ? 0 : -1);
 					return (res);
 				}
 
@@ -702,10 +734,16 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 				res = fwrite(packet.data, 1, packet.dataSize, clientData->file);
 				if (ferror(clientData->file)) {
 					fclose(clientData->file);
+
+					/* Attempting deleting partial file */
+					handle_return_value(remove(fileName) == 0 ? 0 : -1);
 					send_general_error(clientData, get_EC_from_errno());
 					return (ERROR);
 				} else if (res < packet.dataSize) {
 					fclose(clientData->file);
+
+					/* Attempting deleting partial file */
+					handle_return_value(remove(fileName) == 0 ? 0 : -1);
 					send_general_error(clientData, EC_NOT_DEFINED);
 					return (ERROR);
 				}
@@ -719,14 +757,19 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 				res = send_packet(clientData, &packet);
 				if (res != 0) {
 					fclose(clientData->file);
+
+					/* Attempting deleting partial file */
+					handle_return_value(remove(fileName) == 0 ? 0 : -1);
 					return (res);
 				}
 
 				/* EOF */
 				if (dataSize < MAX_DATA_BLOCK_SIZE) {
 					fclose(clientData->file);
-					 break;
-					/* TODO : handle packet re-send if neccasary */
+
+					/* Trying to get additional packet, if the ack was lost */
+					WRQ_dallying(clientData, &packet);
+					break;
 				}
 			}
 		}
@@ -735,6 +778,7 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 	/* Checking if stopped due to max retries */
 	if (retries >= MAX_RETRIES) {
 		fclose(clientData->file);
+
 		/* Attempting deleting partial file */
 		handle_return_value(remove(fileName) == 0 ? 0 : -1);
 		return (ERROR_LOGICAL);
