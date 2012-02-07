@@ -134,7 +134,6 @@ void clear_packet(TFTPPacket *packet) {
 
 void clear_clientData(ClientData *clientData) {
 	memset(clientData, 0, sizeof(ClientData));
-	/* TODO : add additional ops */
 }
 
 short get_short_from_buffer(unsigned char *buffer) {
@@ -639,7 +638,7 @@ void WRQ_dallying(ClientData *clientData, TFTPPacket *ackPacket) {
 		}
 		/* Got data packet - resending last ACK */
 		else {
-			handle_return_value(send_packet(clientData, &packet));
+			handle_return_value(send_packet(clientData, ackPacket));
 		}
 	}
 }
