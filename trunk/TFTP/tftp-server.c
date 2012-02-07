@@ -568,8 +568,8 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
 				retries++;
 			}
-			/* Checking if ACK recieved on the correct block */
-			else if (recvPacket.blockNumber != (unsigned short)(curBlockNumber)) {
+			/* Checking if ACK received on the correct block */
+			else if (recvPacket.blockNumber != curBlockNumber) {
 				/* Re-sending last packet */
 				res = send_packet(clientData, &sendPacket);
 				if (res != 0) {
@@ -579,7 +579,7 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 
 				retries++;
 			}
-			/* The packet is correct - send next block*/
+			/* The packet is correct - send next block */
 			else {
 				retries = 0;
 				curBlockNumber++;
@@ -637,7 +637,7 @@ void WRQ_dallying(ClientData *clientData, TFTPPacket *ackPacket) {
 		else if (packet.opCode != OP_DATA) {
 			handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
 		}
-		/* Got data packet - resending last ack */
+		/* Got data packet - resending last ACK */
 		else {
 			handle_return_value(send_packet(clientData, &packet));
 		}
@@ -839,13 +839,6 @@ int main(int argc, char** argv) {
 		clientData.clientSocket = socket(PF_INET, SOCK_DGRAM, 0);
 		handle_return_value(clientData.clientSocket);
 		if (clientData.clientSocket == -1) {
-			continue;
-		}
-
-		/* Handling general error on request */
-		if (res != 0) {
-			res = send_general_error(&clientData, EC_NOT_DEFINED);
-			handle_return_value(res);
 			continue;
 		}
 
