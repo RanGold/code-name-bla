@@ -508,6 +508,7 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 	int res, retries;
 	unsigned short curBlockNumber = 1;
 	ClientData curSender;
+	int reachedEOF = 0;
 
 	/* Checking if file exists */
 	clientData->file = get_valid_file(fileName, "r");
@@ -541,6 +542,12 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 
 		/* select's timeout reached */
 		if (res == PACKET_NOT_READY) {
+			/* Re-sending last packet */
+			res = send_packet(clientData, &sendPacket);
+			if (res != 0) {
+				fclose(clientData->file);
+				return (res);
+			}
 			retries++;
 		}
 		else if (res == ERROR){
@@ -580,6 +587,10 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 			}
 			/* The packet is correct - send next block */
 			else {
+				if (reachedEOF){
+					break;
+				}
+
 				retries = 0;
 				curBlockNumber++;
 
@@ -598,8 +609,9 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 				}
 
 				if (feof(clientData->file)) {
+					reachedEOF = 1;
 					fclose(clientData->file);
-					break;
+					//break;
 				}
 			}
 		}
