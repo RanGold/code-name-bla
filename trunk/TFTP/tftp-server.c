@@ -8,8 +8,9 @@
 #define MODE_OCTET "octet"
 
 /* Request configuration */
-#define MAX_RETRIES 3
+#define MAX_RETRIES 5
 #define TIMEOUT_USEC 100000
+#define PACKET_RETRY 2
 #define PACKET_READY 1
 #define PACKET_NOT_READY 0
 
@@ -503,11 +504,63 @@ int compare_sockaddr(struct sockaddr_storage *ss1, struct sockaddr_storage *ss2)
 			(memcmp(&(si1->sin_port), &(si2->sin_port), sizeof(in_port_t)) == 0));
 }
 
+int validate_packet(ClientData *clientData, TFTPPacket *sendPacket, TFTPPacket *recvPacket, unsigned short blockNumber, int packetType) {
+	int res;
+	ClientData curSender;
+
+	res = wait_for_packet(clientData->clientSocket);
+	if (res == PACKET_NOT_READY) {
+		/* Re-sending last packet */
+		if (sendPacket != NULL) {
+			res = send_packet(clientData, sendPacket);
+			if (res != 0) {
+				return (ERROR);
+			}
+		}
+
+		return (PACKET_RETRY);
+	} else if (res == ERROR) {
+		return (ERROR);
+	} else if (res == PACKET_READY) {
+		clear_clientData(&curSender);
+		res = recv_packet(clientData->clientSocket, &curSender, recvPacket);
+
+		/* Checking packet validity */
+		if (res != 0) {
+			handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
+			return (PACKET_RETRY);
+		}
+		/* Checking if the data was received from the original client */
+		else if (!compare_sockaddr(&(clientData->clientAddr), &(curSender.clientAddr))) {
+			handle_return_value(send_general_error(clientData, EC_UNKNOWN_TID));
+			return (PACKET_RETRY);
+		}
+		/* Checking right kind of packet was received */
+		else if (recvPacket->opCode != packetType) {
+			handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
+			return (PACKET_RETRY);
+		}
+		/* Checking if correct block was received */
+		else if (recvPacket->blockNumber != blockNumber) {
+			/* Re-sending last packet */
+			if (sendPacket != NULL) {
+				res = send_packet(clientData, sendPacket);
+				if (res != 0) {
+					return (ERROR);
+				}
+			}
+
+			return (PACKET_RETRY);
+		}
+	}
+
+	return (0);
+}
+
 int handle_RRQ(ClientData *clientData, char *fileName) {
 	TFTPPacket sendPacket, recvPacket;
 	int res, retries;
 	unsigned short curBlockNumber = 1;
-	ClientData curSender;
 	int reachedEOF = 0;
 
 	/* Checking if file exists */
@@ -536,83 +589,43 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 
 	retries = 0;
 
-	/* waiting for client's ACK's */
+	/* Waiting for client's ACK's */
 	while (retries < MAX_RETRIES) {
-		res = wait_for_packet(clientData->clientSocket);
+		res = validate_packet(clientData, &sendPacket, &recvPacket, curBlockNumber, OP_ACK);
+		if (res == PACKET_RETRY) {
+			retries++;
+		} else if (res == ERROR) {
+			fclose(clientData->file);
+			send_general_error(clientData, EC_NOT_DEFINED);
+			return (res);
+		}
+		/* The packet is correct - send next block */
+		else {
+			if (reachedEOF) {
+				break;
+			}
 
-		/* select's timeout reached */
-		if (res == PACKET_NOT_READY) {
-			/* Re-sending last packet */
+			retries = 0;
+			curBlockNumber++;
+
+			sendPacket.blockNumber = curBlockNumber;
+			sendPacket.dataSize = fread(sendPacket.data, 1, MAX_DATA_BLOCK_SIZE, clientData->file);
+			if (ferror(clientData->file)) {
+				fclose(clientData->file);
+				send_general_error(clientData, get_EC_from_errno());
+				return (ERROR);
+			}
+
 			res = send_packet(clientData, &sendPacket);
 			if (res != 0) {
 				fclose(clientData->file);
+				send_general_error(clientData, EC_NOT_DEFINED);
 				return (res);
 			}
-			retries++;
-		}
-		else if (res == ERROR){
-			fclose(clientData->file);
-			return (ERROR);
-		}
-		/* packet ready - get it */
-		else if (res == PACKET_READY) {
-			clear_clientData(&curSender);
-			res = recv_packet(clientData->clientSocket, &curSender, &recvPacket);
 
-			/* Checking packet validity */
-			if (res != 0) {
-				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
-				retries++;
-			}
-			/* Checking if the data was received from the original client */
-			else if (!compare_sockaddr(&(clientData->clientAddr), &(curSender.clientAddr))) {
-				handle_return_value(send_general_error(clientData, EC_UNKNOWN_TID));
-				retries++;
-			}
-			/* Checking right kind of packet was received - only ACK allowed */
-			else if (recvPacket.opCode != OP_ACK) {
-				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
-				retries++;
-			}
-			/* Checking if ACK received on the correct block */
-			else if (recvPacket.blockNumber != curBlockNumber) {
-				/* Re-sending last packet */
-				res = send_packet(clientData, &sendPacket);
-				if (res != 0) {
-					fclose(clientData->file);
-					return (res);
-				}
-
-				retries++;
-			}
-			/* The packet is correct - send next block */
-			else {
-				if (reachedEOF){
-					break;
-				}
-
-				retries = 0;
-				curBlockNumber++;
-
-				sendPacket.blockNumber = curBlockNumber;
-				sendPacket.dataSize = fread(sendPacket.data, 1, MAX_DATA_BLOCK_SIZE, clientData->file);
-				if (ferror(clientData->file)) {
-					fclose(clientData->file);
-					send_general_error(clientData, get_EC_from_errno());
-					return (ERROR);
-				}
-
-				res = send_packet(clientData, &sendPacket);
-				if (res != 0) {
-					fclose(clientData->file);
-					return (res);
-				}
-
-				if (feof(clientData->file)) {
-					reachedEOF = 1;
-					fclose(clientData->file);
-					//break;
-				}
+			if (feof(clientData->file)) {
+				reachedEOF = 1;
+				fclose(clientData->file);
 			}
 		}
 	}
@@ -620,47 +633,18 @@ int handle_RRQ(ClientData *clientData, char *fileName) {
 	/* Checking if stopped due to max retries */
 	if (retries >= MAX_RETRIES) {
 		fclose(clientData->file);
+		send_general_error(clientData, EC_NOT_DEFINED);
 		return (ERROR_LOGICAL);
 	}
 
 	return (res);
 }
 
-void WRQ_dallying(ClientData *clientData, TFTPPacket *ackPacket) {
-	int res;
-	ClientData curSender;
-	TFTPPacket packet;
-
-	res = wait_for_packet(clientData->clientSocket);
-	if (res == PACKET_READY) {
-		clear_clientData(&curSender);
-		res = recv_packet(clientData->clientSocket, &curSender, &packet);
-
-		/* Checking packet validity */
-		if (res != 0) {
-			handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
-		}
-		/* Checking if the data was received from the original client */
-		else if (!compare_sockaddr(&(clientData->clientAddr), &(curSender.clientAddr))) {
-			handle_return_value(send_general_error(clientData, EC_UNKNOWN_TID));
-		}
-		/* Checking right kind of packet was received */
-		else if (packet.opCode != OP_DATA) {
-			handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
-		}
-		/* Got data packet - resending last ACK */
-		else {
-			handle_return_value(send_packet(clientData, ackPacket));
-		}
-	}
-}
-
 int handle_WRQ(ClientData *clientData, char *fileName) {
-	TFTPPacket packet;
+	TFTPPacket sendPacket, recvPacket;
 	int res;
 	unsigned short curBlockNumber = 0;
 	int retries;
-	ClientData curSender;
 	int dataSize;
 
 	/* Checking if file exists */
@@ -679,10 +663,10 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 	}
 
 	/* Preparing first packet to send */
-	clear_packet(&packet);
-	packet.opCode = OP_ACK;
-	packet.blockNumber = curBlockNumber;
-	res = send_packet(clientData, &packet);
+	clear_packet(&sendPacket);
+	sendPacket.opCode = OP_ACK;
+	sendPacket.blockNumber = curBlockNumber;
+	res = send_packet(clientData, &sendPacket);
 	if (res != 0) {
 		fclose(clientData->file);
 		return (res);
@@ -691,97 +675,68 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 	/* Waiting for packet */
 	retries = 0;
 	while (retries < MAX_RETRIES) {
-		res = wait_for_packet(clientData->clientSocket);
-		if (res == PACKET_NOT_READY) {
+		res = validate_packet(clientData, &sendPacket, &recvPacket, (unsigned short)(curBlockNumber + 1), OP_DATA);
+
+		if (res == PACKET_RETRY) {
 			retries++;
 		} else if (res == ERROR) {
 			fclose(clientData->file);
 
 			/* Attempting deleting partial file */
 			handle_return_value(remove(fileName) == 0 ? 0 : -1);
-			return (ERROR);
-		} else if (res == PACKET_READY) {
-			clear_clientData(&curSender);
-			res = recv_packet(clientData->clientSocket, &curSender, &packet);
+			send_general_error(clientData, EC_NOT_DEFINED);
+			return (res);
+		}
+		/* Got correct packet */
+		else {
+			retries = 0;
+			curBlockNumber++;
 
-			/* Checking packet validity */
+			/* Writing data */
+			res = fwrite(recvPacket.data, 1, recvPacket.dataSize, clientData->file);
+			if (ferror(clientData->file)) {
+				fclose(clientData->file);
+
+				/* Attempting deleting partial file */
+				handle_return_value(remove(fileName) == 0 ? 0 : -1);
+				send_general_error(clientData, get_EC_from_errno());
+				return (ERROR);
+			} else if (res < recvPacket.dataSize) {
+				fclose(clientData->file);
+
+				/* Attempting deleting partial file */
+				handle_return_value(remove(fileName) == 0 ? 0 : -1);
+				send_general_error(clientData, EC_NOT_DEFINED);
+				return (ERROR);
+			}
+
+			dataSize = recvPacket.dataSize;
+
+			/* Sending ACK */
+			clear_packet(&sendPacket);
+			sendPacket.opCode = OP_ACK;
+			sendPacket.blockNumber = curBlockNumber;
+			res = send_packet(clientData, &sendPacket);
 			if (res != 0) {
-				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
-				retries++;
-			}
-			/* Checking if the data was received from the original client */
-			else if (!compare_sockaddr(&(clientData->clientAddr), &(curSender.clientAddr))) {
-				handle_return_value(send_general_error(clientData, EC_UNKNOWN_TID));
-				retries++;
-			}
-			/* Checking right kind of packet was received */
-			else if (packet.opCode != OP_DATA) {
-				handle_return_value(send_general_error(clientData, EC_ILLEGAL_OPERATION));
-				retries++;
-			}
-			/* Checking if correct block was received */
-			else if (packet.blockNumber != (unsigned short)(curBlockNumber + 1)) {
-				/* Re-sending last ack */
-				clear_packet(&packet);
-				packet.opCode = OP_ACK;
-				packet.blockNumber = curBlockNumber;
-				res = send_packet(clientData, &packet);
-				if (res != 0) {
-					fclose(clientData->file);
+				fclose(clientData->file);
 
-					/* Attempting deleting partial file */
-					handle_return_value(remove(fileName) == 0 ? 0 : -1);
-					return (res);
+				/* Attempting deleting partial file */
+				handle_return_value(remove(fileName) == 0 ? 0 : -1);
+				send_general_error(clientData, EC_NOT_DEFINED);
+				return (res);
+			}
+
+			/* EOF */
+			if (dataSize < MAX_DATA_BLOCK_SIZE) {
+				fclose(clientData->file);
+
+				/* Trying to get additional packet, if the ACK was lost (dallying) */
+				res = validate_packet(clientData, NULL, &recvPacket, curBlockNumber, OP_DATA);
+				if (res != ERROR) {
+					handle_return_value(send_packet(clientData, &sendPacket));
 				}
 
-				retries++;
-			}
-			/* Got correct packet */
-			else {
-				retries = 0;
-				curBlockNumber++;
-
-				/* Writing data */
-				res = fwrite(packet.data, 1, packet.dataSize, clientData->file);
-				if (ferror(clientData->file)) {
-					fclose(clientData->file);
-
-					/* Attempting deleting partial file */
-					handle_return_value(remove(fileName) == 0 ? 0 : -1);
-					send_general_error(clientData, get_EC_from_errno());
-					return (ERROR);
-				} else if (res < packet.dataSize) {
-					fclose(clientData->file);
-
-					/* Attempting deleting partial file */
-					handle_return_value(remove(fileName) == 0 ? 0 : -1);
-					send_general_error(clientData, EC_NOT_DEFINED);
-					return (ERROR);
-				}
-
-				dataSize = packet.dataSize;
-
-				/* Sending ack */
-				clear_packet(&packet);
-				packet.opCode = OP_ACK;
-				packet.blockNumber = curBlockNumber;
-				res = send_packet(clientData, &packet);
-				if (res != 0) {
-					fclose(clientData->file);
-
-					/* Attempting deleting partial file */
-					handle_return_value(remove(fileName) == 0 ? 0 : -1);
-					return (res);
-				}
-
-				/* EOF */
-				if (dataSize < MAX_DATA_BLOCK_SIZE) {
-					fclose(clientData->file);
-
-					/* Trying to get additional packet, if the ack was lost */
-					WRQ_dallying(clientData, &packet);
-					break;
-				}
+				break;
 			}
 		}
 	}
@@ -792,6 +747,7 @@ int handle_WRQ(ClientData *clientData, char *fileName) {
 
 		/* Attempting deleting partial file */
 		handle_return_value(remove(fileName) == 0 ? 0 : -1);
+		send_general_error(clientData, EC_NOT_DEFINED);
 		return (ERROR_LOGICAL);
 	}
 
